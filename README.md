@@ -1,0 +1,1 @@
+# store.solar.dumaget.me
