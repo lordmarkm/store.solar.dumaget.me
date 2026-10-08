@@ -1,0 +1,70 @@
+<div>
+  <header class="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <div><p class="eyebrow mb-2">Administration / catalog</p><h1 class="page-title">Edit product</h1><p class="mt-2 text-sm text-secondary-foreground">Save private changes, then publish the saved version to the public catalog.</p></div>
+    <a routerLink="/admin/products" class="kt-btn kt-btn-light">Back to products</a>
+  </header>
+  @if (!canAccess()) {
+    <section class="kt-card p-6" role="status">
+      <h2 class="text-base font-semibold">Administrator access required</h2><p class="mt-2 text-sm">Access status: {{ access.status() }}. No private product data is available.</p>
+      @if (auth.status() === 'signed-out') { <button type="button" class="kt-btn kt-btn-primary mt-4" [disabled]="auth.busy()" (click)="login.signInGoogle()">{{ auth.busy() ? 'Signing in…' : 'Sign in with Google' }}</button> }
+      @if (auth.error()) { <p role="alert" class="mt-3 text-sm text-danger">{{ auth.error() }}</p> }
+      @if (access.status() === 'unavailable') { <button type="button" class="kt-btn kt-btn-light mt-4" (click)="access.retry()">Retry access check</button> }
+    </section>
+  } @else {
+    @if (loading()) { <p class="kt-card mb-5 p-5 text-sm" role="status">Loading product…</p> }
+    @if (error()) { <section class="kt-card mb-5 p-5"><p role="alert" class="text-sm text-danger">{{ error() }}</p><p class="mt-2 text-sm">Your input is preserved. An unchanged retry reuses its request ID.</p>@if (conflict()) { <p class="mt-2 text-sm">The saved record may have changed elsewhere. Reload it before reviewing your edits again.</p> }<button type="button" class="kt-btn kt-btn-light mt-4" [disabled]="busy()" (click)="reload()"><i class="ki-outline ki-arrows-circle" aria-hidden="true"></i>Reload saved product</button></section> }
+    @if (notice()) { <p class="kt-card mb-5 p-5 text-sm" role="status">{{ notice() }}</p> }
+    @if (product(); as product) {
+      <section class="kt-card mb-5 p-5" aria-label="Product publication status">
+        <p class="font-semibold">{{ product.state === 'published' ? 'Published listing' : 'Private draft' }} · Saved version {{ product.version }}</p>
+        @if (product.state === 'published') {
+          <p class="mt-2 text-sm">Public version: {{ product.publishedVersion ?? 'not reported' }}.</p>
+          @if (product.publishedVersion !== undefined && product.publishedVersion < product.version) { <p class="mt-2 text-sm">Saved private changes are not yet public. Publish the saved working copy to update the listing.</p> }
+        }
+        @if (dirty()) { <p class="mt-2 text-sm font-medium" role="status">Unsaved edits — save first before publishing or unpublishing.</p> }
+        <p class="mt-3 text-xs text-secondary-foreground">Stock availability and tax treatment remain unknown. Product images are saved with the working copy and published with the catalog fields.</p>
+      </section>
+      <form class="kt-card max-w-4xl p-5 sm:p-7" novalidate (ngSubmit)="save()">
+        <fieldset class="grid gap-5 sm:grid-cols-2" [disabled]="loading() || saving() || confirming()"><legend class="sr-only">Edit saved product details</legend>
+          <div><label for="edit-sku" class="mb-2 block text-xs font-medium">SKU (immutable)</label><input id="edit-sku" class="kt-input w-full font-mono" [value]="product.sku" readonly aria-describedby="edit-sku-hint" /><p id="edit-sku-hint" class="mt-1 text-xs text-secondary-foreground">SKU cannot change after creation.</p></div>
+        <div><label for="edit-name" class="mb-2 block text-xs font-medium">Product name</label><input id="edit-name" name="name" class="kt-input w-full" required maxlength="160" [ngModel]="input().name" (ngModelChange)="update('name',$event)" [attr.aria-invalid]="showError('name') ? 'true' : null" [attr.aria-describedby]="showError('name') ? 'edit-name-error' : null" />@if (showError('name'); as error) { <p id="edit-name-error" class="mt-1 text-xs text-danger" role="alert">{{ error }}</p> }</div>
+        <div><label for="edit-brand" class="mb-2 block text-xs font-medium">Brand</label><input id="edit-brand" name="brand" class="kt-input w-full" maxlength="80" [ngModel]="input().brand" (ngModelChange)="update('brand',$event)" [attr.aria-invalid]="showError('brand') ? 'true' : null" [attr.aria-describedby]="showError('brand') ? 'edit-brand-error' : null" />@if (showError('brand'); as error) { <p id="edit-brand-error" class="mt-1 text-xs text-danger" role="alert">{{ error }}</p> }</div>
+        <div><label for="edit-category" class="mb-2 block text-xs font-medium">Category</label><select id="edit-category" name="category" class="kt-select w-full" [ngModel]="input().category" (ngModelChange)="update('category',$event)" [attr.aria-invalid]="showError('category') ? 'true' : null" [attr.aria-describedby]="showError('category') ? 'edit-category-error' : null"><option value="">Not specified</option>@for (item of categories; track item) { <option [value]="item">{{ item }}</option> }</select>@if (showError('category'); as error) { <p id="edit-category-error" class="mt-1 text-xs text-danger" role="alert">{{ error }}</p> }</div>
+        <div><label for="edit-unitCode" class="mb-2 block text-xs font-medium">Sellable unit</label><select id="edit-unitCode" name="unitCode" class="kt-select w-full" [ngModel]="input().unitCode" (ngModelChange)="update('unitCode',$event)" [attr.aria-invalid]="showError('unitCode') ? 'true' : null" [attr.aria-describedby]="showError('unitCode') ? 'edit-unitCode-error' : null"><option value="">Not specified</option>@for (item of units; track item) { <option [value]="item">{{ item }}</option> }</select>@if (showError('unitCode'); as error) { <p id="edit-unitCode-error" class="mt-1 text-xs text-danger" role="alert">{{ error }}</p> }</div>
+        <div><label for="edit-priceText" class="mb-2 block text-xs font-medium">Price (PHP)</label><input id="edit-priceText" name="priceText" class="kt-input w-full" inputmode="decimal" placeholder="Blank means no price" [ngModel]="input().priceText" (ngModelChange)="update('priceText',$event)" [attr.aria-invalid]="showError('priceText') ? 'true' : null" [attr.aria-describedby]="showError('priceText') ? 'edit-priceText-error' : null" />@if (showError('priceText'); as error) { <p id="edit-priceText-error" class="mt-1 text-xs text-danger" role="alert">{{ error }}</p> }</div>
+        <div class="sm:col-span-2"><label for="edit-supplierId" class="mb-2 block text-xs font-medium">Supplier</label><select id="edit-supplierId" name="supplierId" class="kt-select w-full" [ngModel]="input().supplierId" (ngModelChange)="update('supplierId',$event)" [attr.aria-invalid]="showError('supplierId') ? 'true' : null" [attr.aria-describedby]="showError('supplierId') ? 'edit-supplierId-error' : null">@if (!currentSupplierKnown()) { <option [value]="input().supplierId">Current supplier · {{ input().supplierId }} (not loaded)</option> } @for (supplier of suppliers(); track supplier.id) { <option [value]="supplier.id" [disabled]="supplier.status === 'inactive' && supplier.id !== product.supplierId">{{ supplier.name }} · {{ supplier.region }}{{ supplier.status === 'inactive' ? ' (inactive)' : '' }}</option> }</select>@if (showError('supplierId'); as error) { <p id="edit-supplierId-error" class="mt-1 text-xs text-danger" role="alert">{{ error }}</p> }
+          <p class="mt-2 break-all text-xs text-secondary-foreground">Existing supplier IDs are retained even outside this page. Load the active supplier before publishing.</p>
+          @if (suppliersError()) { <p class="mt-2 text-sm text-danger" role="alert">{{ suppliersError() }}</p><button type="button" class="kt-btn kt-btn-light mt-2" [disabled]="suppliersLoading()" (click)="retrySuppliers()">Retry suppliers</button> }
+          @if (supplierCursor()) { <button type="button" class="kt-btn kt-btn-light mt-3" [disabled]="suppliersLoading()" (click)="loadMoreSuppliers()">{{ suppliersLoading() ? 'Loading…' : 'Load more suppliers' }}</button> }
+          @if (suppliersLoading()) { <p class="mt-2 text-xs" role="status">Loading suppliers…</p> }</div>
+        <div class="sm:col-span-2"><label for="edit-description" class="mb-2 block text-xs font-medium">Description</label><textarea id="edit-description" name="description" class="kt-input min-h-32 w-full" maxlength="4000" [ngModel]="input().description" (ngModelChange)="update('description',$event)" [attr.aria-invalid]="showError('description') ? 'true' : null" [attr.aria-describedby]="showError('description') ? 'edit-description-error' : null"></textarea>@if (showError('description'); as error) { <p id="edit-description-error" class="mt-1 text-xs text-danger" role="alert">{{ error }}</p> }</div>
+          @if (input().category === 'Panels') {
+            <app-panel-specification-fields class="block sm:col-span-2" prefix="edit-panel" [value]="input().panelSpecifications" [attempted]="attempted()" (changed)="update('panelSpecifications', $event)" />
+          }
+          <app-product-image-uploader class="block sm:col-span-2" [images]="input().images" [productName]="input().name || product.name"
+            [disabled]="loading() || saving() || confirming()" (imagesChange)="update('images', $event)" (pendingChange)="imageUploading.set($event)" />
+        </fieldset>
+        <footer class="mt-7 flex flex-wrap justify-end gap-3 border-t border-border pt-5">
+          <app-tooltip [label]="busy() ? 'Wait for the current operation.' : dirty() ? 'Save private changes' : 'No unsaved changes to save'" [focusable]="!dirty() || busy()"><button type="submit" class="kt-btn kt-btn-primary" [disabled]="busy() || !dirty()"><i class="ki-outline ki-check" aria-hidden="true"></i>{{ saving() ? 'Saving…' : 'Save changes privately' }}</button></app-tooltip>
+        </footer>
+      </form>
+      <section class="kt-card mt-5 max-w-4xl p-5 sm:p-7" aria-labelledby="publish-checklist">
+        <h2 id="publish-checklist" class="text-lg font-semibold">Publishing checklist</h2>
+        <ul class="mt-4 space-y-2 text-sm">
+          @for (item of checklist(); track item.label) {
+            <li class="flex items-start gap-2 rounded-md border px-3 py-2"
+              [class]="item.ready ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400' : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400'">
+              <i class="ki-outline mt-0.5 shrink-0 text-base" [class.ki-check]="item.ready" [class.ki-cross]="!item.ready" aria-hidden="true"></i>
+              <span><span class="font-semibold">{{ item.ready ? 'Ready' : 'Missing' }}</span> — {{ item.label }}</span>
+            </li>
+          }
+        </ul>
+        <p class="mt-4 text-xs text-secondary-foreground">The server rechecks readiness, supplier activity, your access, and the saved version. A zero PHP price is explicit and valid.</p>
+        <div class="mt-5 flex flex-wrap gap-3">
+          <app-tooltip [label]="publishHint()" [focusable]="!canPublish()"><button type="button" class="kt-btn kt-btn-primary" [disabled]="!canPublish()" (click)="publish()">{{ product.state === 'published' ? 'Publish saved changes' : 'Publish product' }}</button></app-tooltip>
+          @if (product.state === 'published') { <app-tooltip [label]="busy() ? 'Wait for the current operation.' : dirty() ? 'Save changes before unpublishing.' : 'Remove this listing from the public catalog.'" [focusable]="dirty() || busy()"><button type="button" class="kt-btn kt-btn-light" [disabled]="dirty() || busy()" (click)="unpublish()">Unpublish…</button></app-tooltip> }
+        </div>
+      </section>
+    }
+  }
+</div>

@@ -1,0 +1,5 @@
+/* The Provia component subset needed by the solar scaffold. */
+@custom-variant light (&:not(.dark *));
+@import './keenicons.css';
+@import './menu.css';
+@import './container.css';

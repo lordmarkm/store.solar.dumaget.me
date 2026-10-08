@@ -1,0 +1,128 @@
+@font-face {
+  font-family: 'keenicons-solid';
+  src: url('/assets/fonts/keenicons-solid.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'keenicons-outline';
+  src: url('/assets/fonts/keenicons-outline.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
+.ki-solid,
+.ki-outline {
+  speak: never;
+  font-style: normal;
+  font-weight: normal;
+  font-variant: normal;
+  text-transform: none;
+  line-height: 1;
+  display: inline-flex;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.ki-solid {
+  font-family: 'keenicons-solid' !important;
+}
+
+.ki-outline {
+  font-family: 'keenicons-outline' !important;
+}
+
+.ki-star.ki-solid::before,
+.ki-star.ki-outline::before {
+  content: '\eadf';
+}
+
+.ki-down.ki-outline::before {
+  content: '\e9e5';
+}
+
+.ki-up.ki-outline::before {
+  content: '\eb19';
+}
+
+.ki-arrow-right.ki-outline::before {
+  content: '\e948';
+}
+
+.ki-arrows-circle.ki-outline::before {
+  content: '\e950';
+}
+
+.ki-check-circle.ki-outline::before {
+  content: '\e99c';
+}
+
+.ki-check.ki-outline::before,
+.ki-check.ki-solid::before {
+  content: '\e99e';
+}
+
+.ki-clipboard.ki-outline::before {
+  content: '\e9a3';
+}
+
+/* Metronic 9.2 outline/style.css; its font matches the bundled outline WOFF. */
+.ki-handcart.ki-outline::before {
+  content: '\ea37';
+}
+
+.ki-flag.ki-outline::before {
+  content: '\ea1f';
+}
+
+.ki-cross.ki-outline::before {
+  content: '\e9b4';
+}
+
+.ki-eye.ki-outline::before {
+  content: '\ea08';
+}
+
+.ki-file-up.ki-outline::before {
+  content: '\ea15';
+}
+
+.ki-filter-tick.ki-outline::before {
+  content: '\ea1b';
+}
+
+.ki-message-add.ki-outline::before {
+  content: '\ea66';
+}
+
+.ki-message-text.ki-outline::before {
+  content: '\ea6d';
+}
+
+.ki-pencil.ki-outline::before {
+  content: '\ea94';
+}
+
+.ki-screen.ki-outline::before {
+  content: '\eaba';
+}
+
+.ki-trash.ki-outline::before {
+  content: '\eb0e';
+}
+
+/* Verified against the local Metronic 9.2 outline KeenIcons font. */
+.ki-award.ki-outline::before {
+  content: '\e955';
+}
+
+.ki-filter.ki-outline::before {
+  content: '\ea1c';
+}
+
+.ki-phone.ki-outline::before {
+  content: '\ea97';
+}

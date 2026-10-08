@@ -1,0 +1,60 @@
+<section class="bg-card text-card-foreground">
+  <header class="flex items-start justify-between gap-4 border-b border-border p-5 sm:p-6">
+    <div><p class="eyebrow mb-2">{{ projects.accountBacked() ? 'Account-backed project' : 'Browser-local prototype' }}</p><h2 id="new-project-wizard-title" class="text-xl font-semibold">New project wizard</h2><p class="mt-2 text-xs leading-5 text-muted-foreground">Nothing is saved until you confirm. {{ projects.accountBacked() ? 'The reviewed project and BOM are saved to your account.' : 'No account or cloud storage is connected in this local preview.' }}</p></div>
+    <button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light shrink-0" (click)="cancel()" [disabled]="saving()" aria-label="Close New project wizard" title="Close New project wizard"><i class="ki-outline ki-cross" aria-hidden="true"></i></button>
+  </header>
+  <div class="p-5 sm:p-6">
+    <ol class="mb-6 grid grid-cols-3 gap-2 text-xs" aria-label="Wizard progress">
+      @for (label of steps; track label; let index = $index) {
+        <li class="public-panel border border-border p-2" [class.bg-muted]="step() === index" [class.font-semibold]="step() === index" [attr.aria-current]="step() === index ? 'step' : null"><span class="mb-1 block text-primary">{{ index + 1 }}</span>{{ label }}</li>
+      }
+    </ol>
+    <h3 id="wizard-step-heading" tabindex="-1" class="mb-5 text-lg font-semibold">{{ steps[step()] }}</h3>
+    <form novalidate (ngSubmit)="step() === 2 ? create() : next()">
+      <fieldset [disabled]="saving()">
+      @if (step() === 0) {
+        <div class="space-y-5">
+          <div><label for="project-name" class="mb-2 block text-sm font-medium">Project name <span class="text-muted-foreground">(required)</span></label><input id="project-name" name="name" class="kt-input w-full" maxlength="120" required [ngModel]="draft().name" (ngModelChange)="update('name', $event)" [attr.aria-invalid]="error('name') ? 'true' : null" [attr.aria-describedby]="error('name') ? 'name-error' : null" />@if (error('name')) { <p id="name-error" class="mt-2 text-xs" role="alert">{{ error('name') }}</p> }</div>
+          <div><label for="project-classification" class="mb-2 block text-sm font-medium">Classification <span class="text-muted-foreground">(required)</span></label><select id="project-classification" name="classification" class="kt-select w-full" required [ngModel]="draft().classification" (ngModelChange)="update('classification', $event)" [attr.aria-invalid]="error('classification') ? 'true' : null" [attr.aria-describedby]="error('classification') ? 'classification-error' : null"><option [ngValue]="null" disabled>Choose classification</option>@for (value of classifications; track value) { <option [ngValue]="value">{{ classificationLabels[value] }}</option> }</select>@if (error('classification')) { <p id="classification-error" class="mt-2 text-xs" role="alert">{{ error('classification') }}</p> }</div>
+          @if (draft().classification === 'other') { <div><label for="classification-other" class="mb-2 block text-sm font-medium">Describe classification <span class="text-muted-foreground">(optional)</span></label><input id="classification-other" name="classificationOther" class="kt-input w-full" maxlength="240" [ngModel]="draft().classificationOther ?? ''" (ngModelChange)="update('classificationOther', $event)" /></div> }
+          <div><label for="project-location" class="mb-2 block text-sm font-medium">Location <span class="text-muted-foreground">(optional)</span></label><input id="project-location" name="location" class="kt-input w-full" maxlength="240" [ngModel]="draft().location ?? ''" (ngModelChange)="update('location', $event)" /></div>
+          <div><label for="project-description" class="mb-2 block text-sm font-medium">Description <span class="text-muted-foreground">(optional)</span></label><textarea id="project-description" name="description" class="kt-textarea w-full" rows="3" maxlength="2000" [ngModel]="draft().description ?? ''" (ngModelChange)="update('description', $event)"></textarea></div>
+        </div>
+      } @else if (step() === 1) {
+        <div class="space-y-5">
+          <div><label for="project-installation" class="mb-2 block text-sm font-medium">Installation <span class="text-muted-foreground">(required)</span></label><select id="project-installation" name="installation" class="kt-select w-full" required [ngModel]="draft().installation" (ngModelChange)="update('installation', $event)" [attr.aria-invalid]="error('installation') ? 'true' : null" [attr.aria-describedby]="error('installation') ? 'installation-error' : null">@for (value of installations; track value) { <option [ngValue]="value">{{ installationLabels[value] }}</option> }</select><p class="mt-2 text-xs text-muted-foreground">New projects start as Rooftop. You can choose another installation.</p>@if (error('installation')) { <p id="installation-error" class="mt-2 text-xs" role="alert">{{ error('installation') }}</p> }</div>
+          @if (draft().installation === 'other') { <div><label for="installation-other" class="mb-2 block text-sm font-medium">Describe installation <span class="text-muted-foreground">(optional)</span></label><input id="installation-other" name="installationOther" class="kt-input w-full" maxlength="240" [ngModel]="draft().installationOther ?? ''" (ngModelChange)="update('installationOther', $event)" /></div> }
+          <div><label for="project-configuration" class="mb-2 block text-sm font-medium">System configuration <span class="text-muted-foreground">(required)</span></label><select id="project-configuration" name="configuration" class="kt-select w-full" required [ngModel]="draft().configuration" (ngModelChange)="update('configuration', $event)" [attr.aria-invalid]="error('configuration') ? 'true' : null" [attr.aria-describedby]="error('configuration') ? 'configuration-error' : null"><option [ngValue]="null" disabled>Choose configuration</option>@for (value of configurations; track value) { <option [ngValue]="value">{{ configurationLabels[value] }}</option> }</select>@if (error('configuration')) { <p id="configuration-error" class="mt-2 text-xs" role="alert">{{ error('configuration') }}</p> }</div>
+          <div><label for="project-work-scope" class="mb-2 block text-sm font-medium">Work scope <span class="text-muted-foreground">(required)</span></label><select id="project-work-scope" name="workScope" class="kt-select w-full" required [ngModel]="draft().workScope" (ngModelChange)="update('workScope', $event)" [attr.aria-invalid]="error('workScope') ? 'true' : null" [attr.aria-describedby]="error('workScope') ? 'scope-error' : null"><option [ngValue]="null" disabled>Choose work scope</option>@for (value of scopes; track value) { <option [ngValue]="value">{{ scopeLabels[value] }}</option> }</select>@if (error('workScope')) { <p id="scope-error" class="mt-2 text-xs" role="alert">{{ error('workScope') }}</p> }</div>
+          <div><label for="project-notes" class="mb-2 block text-sm font-medium">Notes <span class="text-muted-foreground">(optional)</span></label><textarea id="project-notes" name="notes" class="kt-textarea w-full" rows="3" maxlength="2000" [ngModel]="draft().notes ?? ''" (ngModelChange)="update('notes', $event)"></textarea></div>
+        </div>
+      } @else {
+        <dl class="public-panel grid gap-4 border border-border bg-muted/40 p-4 sm:grid-cols-2">
+          <div class="min-w-0 sm:col-span-2"><dt class="text-xs text-muted-foreground">Project name</dt><dd class="mt-1 break-words font-semibold">{{ draft().name.trim() }}</dd></div>
+          <div><dt class="text-xs text-muted-foreground">Classification</dt><dd class="mt-1 text-sm">{{ classificationLabels[draft().classification!] }}</dd></div>
+          <div><dt class="text-xs text-muted-foreground">Installation</dt><dd class="mt-1 text-sm">{{ installationLabels[draft().installation] }}</dd></div>
+          <div><dt class="text-xs text-muted-foreground">System configuration</dt><dd class="mt-1 text-sm">{{ configurationLabels[draft().configuration!] }}</dd></div>
+          <div><dt class="text-xs text-muted-foreground">Work scope</dt><dd class="mt-1 text-sm">{{ scopeLabels[draft().workScope!] }}</dd></div>
+          @if (draft().classification === 'other' && draft().classificationOther?.trim()) { <div class="min-w-0 sm:col-span-2"><dt class="text-xs text-muted-foreground">Other classification</dt><dd class="mt-1 break-words text-sm">{{ draft().classificationOther }}</dd></div> }
+          @if (draft().installation === 'other' && draft().installationOther?.trim()) { <div class="min-w-0 sm:col-span-2"><dt class="text-xs text-muted-foreground">Other installation</dt><dd class="mt-1 break-words text-sm">{{ draft().installationOther }}</dd></div> }
+          @if (draft().location?.trim()) { <div class="min-w-0 sm:col-span-2"><dt class="text-xs text-muted-foreground">Location</dt><dd class="mt-1 break-words text-sm">{{ draft().location }}</dd></div> }
+          @if (draft().description?.trim()) { <div class="min-w-0 sm:col-span-2"><dt class="text-xs text-muted-foreground">Description</dt><dd class="mt-1 whitespace-pre-wrap break-words text-sm">{{ draft().description }}</dd></div> }
+          @if (draft().notes?.trim()) { <div class="min-w-0 sm:col-span-2"><dt class="text-xs text-muted-foreground">Notes</dt><dd class="mt-1 whitespace-pre-wrap break-words text-sm">{{ draft().notes }}</dd></div> }
+        </dl>
+        @if (guest) {
+          <div class="public-panel mt-4 border border-border p-4 text-sm"><h4 class="font-semibold">Initial BOM — entire cart</h4><ul class="mt-3 space-y-3">@for (item of guestRows; track item.id) { <li><p class="break-words">{{ guestTitle(item.id) }}</p><p class="mt-1 text-xs text-muted-foreground">{{ item.quantity }} × {{ item.product.unitCode }}</p></li> }</ul><p class="mt-3 text-muted-foreground">The project, every equipment row ({{ guestRows.length }} {{ guestRows.length === 1 ? 'line' : 'lines' }}), and the one-time list link are saved together. Later cart edits never sync. Your active project stays unchanged.</p></div>
+        } @else if (pending) {
+          <div class="public-panel mt-4 border border-border p-4 text-sm"><h4 class="font-semibold">Initial BOM item</h4><p class="mt-2 break-words">{{ pendingTitle }}</p><p class="mt-1">{{ pending.quantity }} × {{ pending.product.unitCode }}</p><p class="mt-3 text-muted-foreground">The project and this line are saved together. Your active project and guest cart remain unchanged.</p></div>
+        } @else {
+          <p class="mt-4 text-sm leading-6 text-muted-foreground">This project will start with its own empty BOM. Creating it does not change your active project or the guest cart.</p>
+        }
+      }
+      </fieldset>
+      @if (saveError()) { <p class="public-panel mt-5 border border-border bg-muted p-4 text-sm" role="alert">{{ saveError() }}</p> }
+      <footer class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
+        <button type="button" class="kt-btn kt-btn-light" (click)="cancel()" [disabled]="saving()">Cancel</button>
+        <div class="flex flex-wrap gap-3">@if (step() > 0) { <button type="button" class="kt-btn kt-btn-light" (click)="back()" [disabled]="saving()">Back</button> }<button type="submit" class="kt-btn kt-btn-primary" [disabled]="saving()">{{ step() === 2 ? (saving() ? 'Saving...' : (guest ? 'Create project and link list' : (pending ? 'Create project and add item' : 'Create project'))) : 'Next' }}<i class="ki-outline ki-arrow-right" aria-hidden="true"></i></button></div>
+      </footer>
+    </form>
+  </div>
+</section>

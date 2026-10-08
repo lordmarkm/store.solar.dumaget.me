@@ -1,0 +1,65 @@
+<section class="bg-card text-card-foreground" [attr.aria-labelledby]="data.mode === 'history' ? 'equipment-history-title' : 'start-equipment-list-title'">
+  <header class="flex items-start justify-between gap-4 border-b border-border p-5 sm:p-6">
+    <div class="min-w-0">
+      <p class="eyebrow mb-2">Browser-local cart history</p>
+      @if (data.mode === 'history') {
+        <h2 id="equipment-history-title" class="text-xl font-semibold">Cart history</h2>
+        <p class="mt-2 text-sm leading-6 text-secondary-foreground">Retained carts stay in this browser.</p>
+      } @else {
+        <h2 id="start-equipment-list-title" class="text-xl font-semibold">Start a new cart?</h2>
+        <p class="mt-2 text-sm leading-6 text-secondary-foreground">A new empty cart will become current. Your existing cart and any project link will remain in history.</p>
+      }
+    </div>
+    <button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light shrink-0" aria-label="Close cart dialog" title="Close" [disabled]="saving()" (click)="close()"><i class="ki-outline ki-cross" aria-hidden="true"></i></button>
+  </header>
+
+  <div class="space-y-4 p-5 sm:p-6">
+    @if (error()) { <p class="public-panel border border-border bg-muted p-3 text-sm" role="alert">{{ error() }}</p> }
+
+    @if (data.mode === 'history') {
+      @if (service.guestHistory(); as history) {
+        <ul class="space-y-3" aria-label="Retained carts">
+          @for (list of history.lists; track list.id) {
+            <li class="public-panel min-w-0 border border-border bg-card p-4">
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="break-all font-semibold">Cart {{ list.id }}</h3>
+                    @if (list.id === history.currentListId) { <span class="kt-badge kt-badge-sm bg-primary text-primary-foreground">Current</span> }
+                  </div>
+                  <dl class="mt-3 grid gap-x-5 gap-y-2 text-sm sm:grid-cols-2">
+                    <div><dt class="text-secondary-foreground">Created</dt><dd class="break-words">{{ list.createdAt | date:'medium' }}</dd></div>
+                    <div><dt class="text-secondary-foreground">Updated</dt><dd class="break-words">{{ list.updatedAt | date:'medium' }}</dd></div>
+                    <div><dt class="text-secondary-foreground">Lines</dt><dd>{{ list.items.length }}</dd></div>
+                    <div><dt class="text-secondary-foreground">State</dt><dd>{{ list.state === 'linked' ? linkedProjectName(list) : 'Unlinked' }}</dd></div>
+                  </dl>
+                </div>
+                @if (list.id !== history.currentListId) {
+                  <button type="button" class="kt-btn kt-btn-sm kt-btn-primary shrink-0" [disabled]="saving()" (click)="reopen(list)">Reopen cart<i class="ki-outline ki-check" aria-hidden="true"></i></button>
+                }
+              </div>
+            </li>
+          } @empty {
+            <li class="public-panel border border-border p-4 text-sm text-secondary-foreground">No retained carts.</li>
+          }
+        </ul>
+      } @else {
+        <p class="public-panel border border-border p-4 text-sm text-secondary-foreground">No cart history is available.</p>
+      }
+    } @else {
+      @if (service.currentGuestList(); as current) {
+        <div class="public-panel min-w-0 border border-border bg-muted/40 p-4">
+          <h3 class="font-semibold">Current cart will be retained</h3>
+          <p class="mt-2 break-all text-sm">Cart {{ current.id }}</p>
+          <p class="mt-1 text-sm text-secondary-foreground">{{ current.items.length }} {{ current.items.length === 1 ? 'line' : 'lines' }} · {{ current.state === 'linked' ? linkedProjectName(current) : 'Unlinked' }}</p>
+        </div>
+      }
+      <p class="text-sm leading-6">The new cart will have its own ID, start empty, and remain unlinked. Your current cart contents and project link are retained.</p>
+      <button type="button" class="kt-btn kt-btn-primary" [disabled]="saving()" (click)="startNew()">Start new cart<i class="ki-outline ki-check" aria-hidden="true"></i></button>
+    }
+  </div>
+
+  <footer class="flex justify-end border-t border-border p-5 sm:px-6">
+    <button type="button" class="kt-btn kt-btn-light" [disabled]="saving()" (click)="close()">{{ data.mode === 'history' ? 'Close' : 'Cancel' }}</button>
+  </footer>
+</section>

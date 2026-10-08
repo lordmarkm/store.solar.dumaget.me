@@ -1,0 +1,59 @@
+<div>
+  <header class="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <div><p class="eyebrow mb-2">Administration / sourcing</p><h1 class="page-title">Edit supplier</h1><p class="mt-2 text-sm text-secondary-foreground">Update private supplier details without changing the supplier identity or its history.</p></div>
+    <a routerLink="/admin/suppliers" class="kt-btn kt-btn-light">Back to suppliers</a>
+  </header>
+  @if (!canAccess()) {
+    <section class="kt-card p-6" role="status" aria-live="polite"><h2 class="text-base font-semibold">Administrator access</h2><p class="mt-2 text-sm text-secondary-foreground">{{ statusMessage() }}</p>
+      @if (access.status() === 'signed-out') { @if (auth.status() === 'signed-out') { <button type="button" class="kt-btn kt-btn-primary mt-5" [disabled]="auth.busy()" (click)="login.signInGoogle()">{{ auth.busy() ? 'Signing in…' : 'Sign in with Google' }}</button> } @else { <p class="mt-3 text-sm text-secondary-foreground">Google sign-in is unavailable right now. No private supplier records were opened.</p> } @if (auth.error()) { <p class="mt-3 text-sm text-danger" role="alert">{{ auth.error() }}</p> } }
+      @if (access.status() === 'unavailable') { <button type="button" class="kt-btn kt-btn-light mt-5" (click)="access.retry()"><i class="ki-outline ki-arrows-circle" aria-hidden="true"></i>Retry access check</button> }
+    </section>
+  } @else if (loading() && !supplier()) {
+    <p class="kt-card p-6 text-sm" role="status">Loading private supplier details…</p>
+  } @else if (error() && !supplier()) {
+    <section class="kt-card p-6" role="alert"><p class="text-sm text-danger">{{ error() }}</p><button type="button" class="kt-btn kt-btn-light mt-4" [disabled]="loading()" (click)="reload()">Retry load</button></section>
+  } @else if (supplier(); as supplier) {
+    <div class="mb-5 flex flex-wrap items-center gap-3">
+      <span class="kt-badge" [class.kt-badge-success]="supplier.status === 'active'" [class.kt-badge-outline]="supplier.status === 'inactive'">{{ supplier.status === 'active' ? 'Active' : 'Inactive' }}</span>
+      @if (dirty()) { <span class="text-sm text-secondary-foreground">Unsaved edits</span> }
+      @if (loading()) { <span class="text-sm text-secondary-foreground" role="status">Refreshing…</span> }
+    </div>
+
+    @if (error()) { <section class="kt-card mb-5 p-4" role="alert"><p class="text-sm text-danger">{{ error() }}</p>@if (conflict()) { <p class="mt-2 text-sm">Another administrator changed this supplier. Your edits are preserved; reload the latest version before retrying.</p><button type="button" class="kt-btn kt-btn-light mt-3" [disabled]="busy()" (click)="reload()">Reload latest supplier</button> }</section> }
+    @if (notice()) { <p class="mb-5 text-sm text-primary" role="status" aria-live="polite">{{ notice() }}</p> }
+
+    <form class="kt-card max-w-4xl p-5 sm:p-7" novalidate (ngSubmit)="save()">
+      <fieldset class="grid gap-5 sm:grid-cols-2" [disabled]="busy()"><legend class="sr-only">Supplier contact details</legend>
+        <div><label for="edit-supplier-name" class="mb-2 block text-xs font-medium">Supplier name <span aria-hidden="true">*</span></label><input id="edit-supplier-name" name="name" class="kt-input w-full" required maxlength="160" autocomplete="organization" [ngModel]="input().name" (ngModelChange)="update('name',$event)" [attr.aria-invalid]="showError('name') ? 'true' : null" [attr.aria-describedby]="showError('name') ? 'edit-supplier-name-error' : null" />@if (showError('name'); as message) { <p id="edit-supplier-name-error" class="mt-1 text-xs text-danger" role="alert">{{ message }}</p> }</div>
+        <div><label for="edit-supplier-region" class="mb-2 block text-xs font-medium">Region</label><input id="edit-supplier-region" name="region" class="kt-input w-full" maxlength="120" [ngModel]="input().region" (ngModelChange)="update('region',$event)" [attr.aria-invalid]="showError('region') ? 'true' : null" [attr.aria-describedby]="showError('region') ? 'edit-supplier-region-error' : null" />@if (showError('region'); as message) { <p id="edit-supplier-region-error" class="mt-1 text-xs text-danger" role="alert">{{ message }}</p> }</div>
+        <div class="sm:col-span-2"><label for="edit-supplier-description" class="mb-2 block text-xs font-medium">Description</label><textarea id="edit-supplier-description" name="description" class="kt-input min-h-32 w-full" maxlength="4000" [ngModel]="input().description" (ngModelChange)="update('description',$event)" [attr.aria-invalid]="showError('description') ? 'true' : null" [attr.aria-describedby]="showError('description') ? 'edit-supplier-description-error' : null"></textarea>@if (showError('description'); as message) { <p id="edit-supplier-description-error" class="mt-1 text-xs text-danger" role="alert">{{ message }}</p> }</div>
+        <div class="sm:col-span-2"><label for="edit-supplier-website" class="mb-2 block text-xs font-medium">Website <span class="font-normal text-secondary-foreground">(optional, HTTPS only)</span></label><input id="edit-supplier-website" name="website" type="url" class="kt-input w-full" maxlength="500" placeholder="https://example.com" [ngModel]="input().website" (ngModelChange)="update('website',$event)" [attr.aria-invalid]="showError('website') ? 'true' : null" [attr.aria-describedby]="showError('website') ? 'edit-supplier-website-error' : null" />@if (showError('website'); as message) { <p id="edit-supplier-website-error" class="mt-1 text-xs text-danger" role="alert">{{ message }}</p> }</div>
+        <div><label for="edit-supplier-email" class="mb-2 block text-xs font-medium">Email <span class="font-normal text-secondary-foreground">(optional)</span></label><input id="edit-supplier-email" name="email" type="email" class="kt-input w-full" maxlength="320" autocomplete="email" [ngModel]="input().email" (ngModelChange)="update('email',$event)" [attr.aria-invalid]="showError('email') ? 'true' : null" [attr.aria-describedby]="showError('email') ? 'edit-supplier-email-error' : null" />@if (showError('email'); as message) { <p id="edit-supplier-email-error" class="mt-1 text-xs text-danger" role="alert">{{ message }}</p> }</div>
+        <div><label for="edit-supplier-phone" class="mb-2 block text-xs font-medium">Phone <span class="font-normal text-secondary-foreground">(optional)</span></label><input id="edit-supplier-phone" name="phone" type="tel" class="kt-input w-full" maxlength="80" autocomplete="tel" [ngModel]="input().phone" (ngModelChange)="update('phone',$event)" [attr.aria-invalid]="showError('phone') ? 'true' : null" [attr.aria-describedby]="showError('phone') ? 'edit-supplier-phone-error' : null" />@if (showError('phone'); as message) { <p id="edit-supplier-phone-error" class="mt-1 text-xs text-danger" role="alert">{{ message }}</p> }</div>
+      </fieldset>
+
+      <section class="mt-6 rounded-lg border border-border p-4" aria-labelledby="supplier-record-identity">
+        <h2 id="supplier-record-identity" class="text-sm font-semibold">Record identity and history</h2>
+        <dl class="mt-3 grid gap-3 text-xs sm:grid-cols-2"><div><dt class="text-secondary-foreground">Supplier ID</dt><dd class="mt-1 break-all font-mono">{{ supplier.id }}</dd></div><div><dt class="text-secondary-foreground">Record version</dt><dd class="mt-1">{{ supplier.version }}</dd></div><div><dt class="text-secondary-foreground">Created</dt><dd class="mt-1">{{ supplier.createdAt }}</dd></div><div><dt class="text-secondary-foreground">Last updated</dt><dd class="mt-1">{{ supplier.updatedAt }}</dd></div></dl>
+        <p class="mt-3 text-xs leading-5 text-secondary-foreground">The supplier ID and creation history are preserved when contact details change. Inactive supplier contact remains available for existing products and purchase order history.</p>
+      </section>
+
+      <footer class="mt-7 flex flex-wrap justify-end gap-3 border-t border-border pt-5">
+        <button type="button" class="kt-btn kt-btn-light" [disabled]="busy()" (click)="cancel()">Cancel</button>
+        <button type="submit" class="kt-btn kt-btn-primary" [disabled]="busy() || !dirty()"><i class="ki-outline ki-check" aria-hidden="true"></i>{{ saving() ? 'Saving…' : 'Save changes' }}</button>
+      </footer>
+    </form>
+
+    <section class="kt-card mt-5 max-w-4xl p-5 sm:p-7" aria-labelledby="supplier-availability-heading">
+      <h2 id="supplier-availability-heading" class="text-lg font-semibold">Supplier availability</h2>
+      @if (supplier.status === 'active') {
+        <p class="mt-2 text-sm leading-6 text-secondary-foreground">Deactivating blocks new sourcing and product publishing through this supplier. Existing products, contact details, purchase order history, and current publication state are not deleted or changed.</p>
+        <button type="button" class="kt-btn kt-btn-light mt-4" [disabled]="busy() || dirty()" (click)="changeStatus('inactive')">Deactivate supplier</button>
+      } @else {
+        <p class="mt-2 text-sm leading-6 text-secondary-foreground">This inactive supplier remains visible for contact and history. Reactivation is a separate confirmed action that allows new sourcing and product publishing again.</p>
+        <button type="button" class="kt-btn kt-btn-primary mt-4" [disabled]="busy() || dirty()" (click)="changeStatus('active')">Reactivate supplier</button>
+      }
+      @if (dirty()) { <p class="mt-2 text-xs text-secondary-foreground">Save or discard contact edits before changing supplier availability.</p> }
+    </section>
+  }
+</div>

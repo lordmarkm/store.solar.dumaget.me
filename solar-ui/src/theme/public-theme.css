@@ -1,0 +1,102 @@
+/* Stitch: Solar Wholesale Engine. Route-scoped tokens also reach CDK overlays. */
+:root[data-solar-theme='public'] {
+  --background: #f3fbf7;
+  --foreground: #17312b;
+  --card: #ffffff;
+  --card-foreground: #17312b;
+  --popover: #ffffff;
+  --popover-foreground: #17312b;
+  --primary: #0e4433;
+  --primary-foreground: #ffffff;
+  --secondary: #c7e86b;
+  --secondary-foreground: #17312b;
+  --muted: #ddf2e9;
+  --muted-foreground: #527266;
+  --accent: #cfe9dd;
+  --accent-foreground: #0e4433;
+  --border: #c2dccf;
+  --input: #a8c8b8;
+  --ring: #166b4f;
+  --mono: #17312b;
+  --mono-foreground: #ffffff;
+  --public-support: #166b4f;
+  --public-radius: 2px;
+  --public-font-body: 'DM Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --public-font-display: 'Space Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
+  --public-card-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+  --public-card-hover-shadow: 0 4px 6px rgb(0 0 0 / 8%);
+  font-family: var(--public-font-body);
+}
+
+:root[data-solar-theme='public'].dark {
+  --background: #10251e;
+  --foreground: #e3f4eb;
+  --card: #132d23;
+  --card-foreground: #e3f4eb;
+  --popover: #132d23;
+  --popover-foreground: #e3f4eb;
+  --primary: #c7e86b;
+  --primary-foreground: #0e4433;
+  --secondary: #284a3b;
+  --secondary-foreground: #c7e86b;
+  --muted: #17312b;
+  --muted-foreground: #a2bdb0;
+  --accent: #214334;
+  --accent-foreground: #e3f4eb;
+  --border: #365448;
+  --input: #48695a;
+  --ring: #c7e86b;
+  --mono: #e3f4eb;
+  --mono-foreground: #17312b;
+  --public-support: #96d9b9;
+  --public-card-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  --public-card-hover-shadow: 0 4px 6px rgb(0 0 0 / 30%);
+}
+
+:root[data-solar-theme='public'] body {
+  font-family: var(--public-font-body);
+}
+
+:root[data-solar-theme='public'] :is(h1, h2, h3, h4, h5, h6, label, button, th, dt, .eyebrow, .kt-btn, .kt-badge, .kt-menu-title, .public-label, .public-price) {
+  font-family: var(--public-font-display);
+}
+
+:root[data-solar-theme='public'] .public-price { font-variant-numeric: tabular-nums; }
+:root[data-solar-theme='public'] .public-hero h1 { font-weight: 700; }
+
+/* Page geometry, not the rounded tiles used by Stitch's palette board. */
+:root[data-solar-theme='public'] .kt-card {
+  border-radius: var(--public-radius);
+  box-shadow: var(--public-card-shadow);
+}
+
+:root[data-solar-theme='public'] :is(.kt-btn, .kt-input, .kt-select, .kt-textarea, .kt-badge, .product-stage, .product-gallery-thumb, .public-panel, .public-category, .solar-dialog-panel) {
+  border-radius: var(--public-radius);
+}
+
+:root[data-solar-theme='public'] .public-product-card {
+  transition: box-shadow 200ms ease;
+}
+
+/* Gallery photos need more room than KTUI's compact icon-button dimensions. */
+:root[data-solar-theme='public'] .kt-btn.product-gallery-thumb {
+  width: 72px;
+  min-width: 72px;
+  height: 64px;
+  padding: 4px;
+}
+
+@media (hover: hover) {
+  :root[data-solar-theme='public'] .public-product-card:hover {
+    box-shadow: var(--public-card-hover-shadow);
+  }
+}
+
+:root[data-solar-theme='public'] .public-product-card:focus-within {
+  box-shadow: var(--public-card-hover-shadow);
+}
+
+:root[data-solar-theme='public'] .eyebrow { color: var(--public-support); }
+:root[data-solar-theme='public'] .public-hero {
+  background: linear-gradient(125deg, var(--accent), var(--card) 78%);
+}

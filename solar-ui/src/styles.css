@@ -1,0 +1,106 @@
+@import '@angular/cdk/overlay-prebuilt.css';
+@import 'tailwindcss';
+@source '../node_modules/@keenthemes/ktui/dist';
+@import './theme/metronic/config.ktui.css';
+@import '@keenthemes/ktui/styles.css';
+@import './theme/metronic/components/index.css';
+@import './theme/metronic/demo1.css';
+@import '@fontsource-variable/dm-sans';
+@import '@fontsource-variable/space-grotesk';
+@import './theme/public-theme.css';
+
+@layer base {
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body { @apply m-0 bg-muted text-foreground antialiased; overflow-x: clip; }
+  button:not(:disabled), a, select { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  :focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+  svg { flex-shrink: 0; }
+}
+
+@layer components {
+  /* Provia's app-owned secondary variant; KTUI 1.2.7 does not supply it. */
+  .kt-btn.kt-btn-light {
+    background-color: color-mix(in srgb, var(--background) 96%, var(--foreground));
+    color: var(--foreground);
+    border: 1px solid var(--primary);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+  }
+  .kt-btn.kt-btn-light :is(i, svg) { color: inherit; }
+  .kt-btn.kt-btn-light:hover:not(:disabled), .kt-btn.kt-btn-light.active:not(:disabled) {
+    background-color: color-mix(in srgb, var(--background) 90%, var(--foreground));
+    border-color: var(--primary);
+    color: var(--foreground);
+  }
+  .kt-btn.kt-btn-light:active:not(:disabled) { box-shadow: inset 0 1px 2px rgb(0 0 0 / 12%); }
+  .kt-btn.kt-btn-light:disabled {
+    background-color: var(--muted);
+    border-color: var(--input);
+    color: var(--muted-foreground);
+    opacity: 0.55;
+    box-shadow: none;
+  }
+  .eyebrow { @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary-foreground; }
+  .page-title { @apply text-2xl font-semibold tracking-tight sm:text-3xl; }
+  .page-width { @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8; }
+  .product-stage { background: color-mix(in srgb, var(--primary) 5%, var(--card)); }
+  .kt-card { min-width: 0; }
+  .skip-link { @apply fixed start-4 top-4 z-[2000] -translate-y-24 rounded-lg bg-primary px-4 py-2 text-primary-foreground focus:translate-y-0; }
+}
+
+.solar-dialog-backdrop { background: rgb(15 23 42 / 50%); }
+
+/* KTUI owns placement, stacking, animation and dismissal; app tokens own contrast. */
+.kt-toast.solar-operation-toast {
+  width: 24rem;
+  max-width: calc(100vw - 30px);
+  background: var(--card);
+  color: var(--foreground);
+}
+.solar-toast-content { display: flex; align-items: start; gap: 0.75rem; width: 100%; min-width: 0; }
+.solar-operation-toast .kt-alert-title { min-width: 0; overflow-wrap: anywhere; }
+.solar-operation-toast .kt-alert-icon { font-size: 1.25rem; }
+.solar-operation-toast.kt-alert-success .kt-alert-icon { color: var(--primary); }
+.solar-operation-toast.kt-alert-destructive .kt-alert-icon { color: var(--destructive); }
+.solar-operation-toast .kt-alert-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.75rem; height: 1.75rem; margin: -0.25rem; flex-shrink: 0;
+}
+.solar-operation-toast .kt-alert-close i { color: var(--foreground); font-size: 1rem; }
+@media (prefers-reduced-motion: reduce) {
+  .solar-operation-toast { animation-duration: 1ms !important; transition: none !important; }
+}
+/* Disabled native buttons suppress pointer events in some browsers. Retarget only
+   tooltip-wrapped disabled actions to their focusable hint wrapper. */
+.solar-tooltip-trigger:has(button:disabled) { cursor: not-allowed; }
+.solar-tooltip-trigger button:disabled,
+.solar-tooltip-trigger button:disabled * { pointer-events: none; }
+.solar-tooltip-bubble { position: relative; }
+.solar-tooltip-arrow {
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-inline: 8px solid transparent;
+}
+.solar-tooltip-bubble[data-side='above'] .solar-tooltip-arrow {
+  top: 100%;
+  border-top: 8px solid var(--foreground);
+}
+.solar-tooltip-bubble[data-side='below'] .solar-tooltip-arrow {
+  bottom: 100%;
+  border-bottom: 8px solid var(--foreground);
+}
+@media (min-width: 1024px) {
+  .demo1.kt-sidebar-collapse .kt-sidebar:not(:hover) app-brand .kt-menu-title,
+  .demo1.kt-sidebar-collapse .kt-sidebar:not(:hover) .workspace-nav-label { display: none; }
+}
+.solar-dialog-panel { max-height: calc(100dvh - 32px); overflow-y: auto; border-radius: 12px; }
+.solar-menu-panel { height: 100dvh; overflow-y: auto; }
+body:has(.cdk-overlay-backdrop) { overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

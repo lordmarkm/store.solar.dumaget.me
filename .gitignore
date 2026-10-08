@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.angular/
+out-tsc/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+artifacts/qa/
+.firebase/
+*firebase-adminsdk*.json
+/infra/dumaget-me-solar-firebase-adminsdk-fbsvc-250560e75d.json

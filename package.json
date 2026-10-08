@@ -1,0 +1,14 @@
+{
+  "name": "solar-ecommerce-workspace",
+  "private": true,
+  "scripts": {
+    "start": "npm --prefix solar-ui start",
+    "build": "npm --prefix solar-ui run build",
+    "test": "npm --prefix solar-ui test",
+    "api:dev": "npm --prefix backend run dev",
+    "api:build": "npm --prefix backend run build",
+    "api:start": "npm --prefix backend start",
+    "api:check": "npm --prefix backend run check",
+    "api:test": "npm --prefix backend test"
+  }
+}

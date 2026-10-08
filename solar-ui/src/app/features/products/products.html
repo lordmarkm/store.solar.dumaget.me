@@ -1,0 +1,76 @@
+<div class="mb-6 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <p class="eyebrow mb-2">Administration / catalog</p>
+    <h1 class="page-title">Products</h1>
+    <p class="mt-2 text-sm text-secondary-foreground">Manage the equipment behind your storefront.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-3">
+    <a routerLink="/admin/inventory" class="kt-btn kt-btn-light"><i class="ki-outline ki-filter" aria-hidden="true"></i>View inventory</a>
+    @if (preview.enabled) { <a routerLink="/admin/products/new" [queryParams]="{ returnTo: listUrl() }" class="kt-btn kt-btn-primary"><i class="ki-outline ki-pencil" aria-hidden="true"></i>New product</a> } @else { <app-tooltip [label]="'New product: ' + mutationReason" [focusable]="true">
+      <button type="button" class="kt-btn kt-btn-primary" disabled aria-describedby="product-preview-note"><i class="ki-outline ki-pencil" aria-hidden="true"></i>New product</button>
+    </app-tooltip> }
+  </div>
+</div>
+
+<div id="product-preview-note" class="mb-6 rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm leading-6">
+  <p class="font-semibold">{{ preview.enabled ? 'Development-only product preview' : 'Read-only catalog preview' }}</p>
+  <p class="text-secondary-foreground">Sample products, prices and allocations only. Fixture publication states and update dates are not configured. @if (preview.enabled) { New preview drafts are held in this app's memory only and disappear on refresh or close. } Editing existing products, publishing and live persistence are not connected; this page does not grant admin permissions.</p>
+</div>
+
+<div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  <article class="kt-card p-5"><p class="eyebrow">Products</p><p class="mt-3 text-2xl font-semibold">{{ rows().length }}</p><p class="mt-2 text-xs text-secondary-foreground">Fixtures and in-memory preview drafts</p></article>
+  <article class="kt-card p-5"><p class="eyebrow">Categories</p><p class="mt-3 text-2xl font-semibold">{{ categories().length }}</p><p class="mt-2 text-xs text-secondary-foreground">Equipment lines in this preview</p></article>
+  <article class="kt-card p-5"><p class="eyebrow">Brands</p><p class="mt-3 text-2xl font-semibold">{{ brands().length }}</p><p class="mt-2 text-xs text-secondary-foreground">Brands represented in the preview</p></article>
+  <article class="kt-card p-5"><p class="eyebrow">Preview drafts</p><p class="mt-3 text-2xl font-semibold">{{ preview.drafts().length }}</p><p class="mt-2 text-xs text-secondary-foreground">Not live publication records</p></article>
+</div>
+
+<section class="kt-card" aria-labelledby="products-list-heading">
+  <header class="kt-card-header flex-wrap gap-3"><h2 id="products-list-heading" class="kt-card-title">Product catalog</h2><span class="text-xs text-secondary-foreground">Sample data · no live writes</span></header>
+  <div class="grid gap-4 border-b border-border p-5 sm:grid-cols-2 xl:grid-cols-3">
+    <div><label for="products-search" class="mb-2 block text-xs font-medium">Search products</label><input id="products-search" type="search" class="kt-input w-full" placeholder="SKU, name or brand…" maxlength="120" [ngModel]="query().search" (ngModelChange)="update({ search: $event })" /></div>
+    <div><label for="products-category" class="mb-2 block text-xs font-medium">Category</label><select id="products-category" class="kt-select w-full" [ngModel]="query().category" (ngModelChange)="update({ category: $event })"><option value="">All categories</option>@for (category of categories(); track category) { <option [value]="category">{{ category }}</option> }</select></div>
+    <div><label for="products-brand" class="mb-2 block text-xs font-medium">Brand</label><select id="products-brand" class="kt-select w-full" [ngModel]="query().brand" (ngModelChange)="update({ brand: $event })"><option value="">All brands</option>@for (brand of brands(); track brand) { <option [value]="brand">{{ brand }}</option> }</select></div>
+    <div><label for="products-supplier" class="mb-2 block text-xs font-medium">Supplier</label><select id="products-supplier" class="kt-select w-full" [ngModel]="query().supplier" (ngModelChange)="update({ supplier: $event })"><option value="">All suppliers</option>@for (supplier of suppliers(); track supplier.id) { <option [value]="supplier.id">{{ supplier.name }}</option> }</select></div>
+    <div><label for="products-state" class="mb-2 block text-xs font-medium">Publication state</label><select id="products-state" class="kt-select w-full" [ngModel]="query().state" (ngModelChange)="update({ state: $event })"><option value="all">All states</option>@for (state of states; track state) { <option [value]="state">{{ stateLabels[state] }}</option> }</select></div>
+  </div>
+  <div class="flex flex-wrap items-center justify-between gap-4 border-b border-border px-5 py-4">
+    <p class="text-sm text-secondary-foreground" role="status" aria-live="polite" aria-atomic="true">{{ filtered().length }} matching {{ filtered().length === 1 ? 'product' : 'products' }} @if (hasFilters()) { <span>· Filters applied</span> }</p>
+    <div class="flex flex-wrap items-center gap-3">
+      <label for="products-sort" class="text-xs font-medium">Sort by</label><select id="products-sort" class="kt-select w-40" [ngModel]="query().sort" (ngModelChange)="update({ sort: $event })"><option value="name">Product name</option><option value="sku">SKU</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></select>
+      <button type="button" class="kt-btn kt-btn-sm kt-btn-light" (click)="reset()"><i class="ki-outline ki-cross" aria-hidden="true"></i>Clear filters</button>
+    </div>
+  </div>
+
+  <div class="relative overflow-x-auto" role="region" aria-label="Products table, scroll horizontally for all columns" tabindex="0">
+    <table class="kt-table min-w-[1050px] text-sm">
+      <caption class="sr-only">Fixture products and development preview drafts. Fixture prices and stock are illustrative; preview drafts have no stock or live offers.</caption>
+      <thead><tr><th scope="col">Product / SKU</th><th scope="col">Category</th><th scope="col">Publication</th><th scope="col">Sample unit price</th><th scope="col">Sample allocation</th><th scope="col">Updated</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>
+        @for (row of result().rows; track row.product.id) {
+          <tr>
+            <td><div class="flex items-center gap-3"><div class="product-stage flex h-12 w-16 shrink-0 items-center justify-center rounded-md">@if (row.product.visual; as visual) { <app-product-visual [kind]="visual" [images]="row.product.images" variant="thumb" [alt]="row.product.name + ' product image'" /> } @else { <span class="text-[10px] text-secondary-foreground">No image</span> }</div><div class="max-w-64"><p class="mb-1 break-all font-mono text-[10px] text-secondary-foreground">{{ row.product.sku }}</p><button type="button" class="break-words text-start font-semibold hover:text-primary hover:underline" (click)="detail(row)" [attr.aria-label]="'View ' + row.product.name + ' details'">{{ row.product.name }}</button><p class="mt-1 text-xs text-secondary-foreground">{{ row.product.brand || 'Brand not set' }} · {{ row.product.spec }}</p></div></div></td>
+            <td>{{ row.product.category || 'Not set' }}</td>
+            <td><span class="inline-flex rounded-md border border-border bg-muted px-2 py-1 text-xs font-medium">{{ stateLabels[row.publicationState] }}</span></td>
+            <td>@if (row.price; as price) { <p class="whitespace-nowrap font-semibold">{{ price.amountMinor / 100 | currency:price.currency:'symbol':'1.2-2' }}</p> } @else { <p>{{ row.previewDraft ? 'Unpriced' : 'Not recorded' }}</p> }<p class="mt-1 text-xs text-secondary-foreground">{{ row.product.unit ? 'Per ' + row.product.unit : 'Unit not set' }} · Tax unspecified</p></td>
+            <td>@if (row.product.stock !== null) { <p class="font-medium">{{ row.product.stock }} {{ row.product.unit }}{{ row.product.stock === 1 ? '' : 's' }}</p><p class="mt-1 text-xs text-secondary-foreground">{{ row.product.depot }} · Not live</p> } @else { <span class="text-xs text-secondary-foreground">Not configured</span> }</td>
+            <td><span class="text-xs text-secondary-foreground">{{ row.updatedAt ? (row.updatedAt | date:'mediumDate') : 'Not recorded' }}</span>@if (row.previewDraft) { <p class="mt-1 text-xs text-secondary-foreground">In-memory draft</p> }</td>
+            <td><div class="flex items-center gap-3">
+              <app-tooltip [label]="'View ' + row.product.sku + ' details'"><button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" (click)="detail(row)" [attr.aria-label]="'View ' + row.product.sku + ' details'" [attr.title]="'View ' + row.product.sku + ' details'"><i class="ki-outline ki-eye text-base" aria-hidden="true"></i></button></app-tooltip>
+              <app-tooltip [label]="'Edit ' + row.product.sku + ': ' + mutationReason" [focusable]="true"><button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" disabled [attr.aria-label]="'Edit ' + row.product.sku" [attr.title]="mutationReason" aria-describedby="product-preview-note"><i class="ki-outline ki-pencil text-base" aria-hidden="true"></i></button></app-tooltip>
+            </div></td>
+          </tr>
+        } @empty {
+          <tr><td colspan="7" class="py-12 text-center"><p class="font-semibold">No matching products</p><p class="mx-auto mt-2 max-w-md text-sm text-secondary-foreground">Try another search or clear your filters. Fixtures have no publication state; preview drafts disappear on refresh. Publishing and archiving are not connected.</p><button type="button" class="kt-btn kt-btn-light mt-5" (click)="reset()">Clear filters</button></td></tr>
+        }
+      </tbody>
+    </table>
+  </div>
+  <footer class="kt-card-footer flex-wrap justify-between gap-4">
+    <p class="text-xs text-secondary-foreground">Showing {{ result().from }}–{{ result().to }} of {{ result().total }} products · PHP</p>
+    <div class="flex flex-wrap items-center gap-3">
+      <label for="products-page-size" class="text-xs font-medium">Rows per page</label><select id="products-page-size" class="kt-select w-20" [ngModel]="query().pageSize" (ngModelChange)="setPageSize($event)">@for (size of pageSizes; track size) { <option [value]="size">{{ size }}</option> }</select>
+      <nav class="flex items-center gap-3" aria-label="Product pagination"><button type="button" class="kt-btn kt-btn-sm kt-btn-light" (click)="previous()" [disabled]="result().page === 1">Previous</button><span class="text-xs text-secondary-foreground">Page {{ result().page }} of {{ result().pageCount }}</span><button type="button" class="kt-btn kt-btn-sm kt-btn-light" (click)="next()" [disabled]="result().page === result().pageCount">Next</button></nav>
+    </div>
+  </footer>
+</section>
+<p class="mt-5 text-xs leading-5 text-secondary-foreground">Catalog content, supplier purchase costs and inventory adjustments are separate workflows. Viewing a product here does not modify guest equipment lists, project BOMs or purchase orders.</p>

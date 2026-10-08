@@ -1,0 +1,117 @@
+import { Dialog } from '@angular/cdk/dialog';
+import { TestBed } from '@angular/core/testing';
+import { provideRouter, Router } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { routes } from '../../app.routes';
+import { PRODUCTS } from '../../core/demo-data';
+import { createNewProjectDraft } from '../../core/models';
+import { pendingProduct } from '../../core/project-bom';
+import { ProjectService, LOCAL_PROJECTS_KEY } from '../../core/project.service';
+import { AddToProjectDialog } from '../../shared/add-to-project-dialog';
+import { BomLineEditor } from '../../shared/bom-line-editor';
+import { ProjectBomPage } from './project-bom';
+import { signal } from '@angular/core';
+import { CUSTOMER_SESSION } from '../../core/customer-access.service';
+import { PLANNING_PRODUCTS } from '../../core/product-source';
+import { PublicCatalogService } from '../../core/public-catalog.service';
+import { NoticeService } from '../../core/notice.service';
+import { firstValueFrom } from 'rxjs';
+const input=(name='Roof')=>({...createNewProjectDraft(),name,classification:'residential' as const,configuration:'hybrid' as const,workScope:'new-installation' as const});
+const text=()=>({title:'External cable',description:'Supplier elsewhere',unit:'meter',quantity:10,notes:'Retain notes'});
+
+describe('catalog destinations and mixed project BOM UI',()=>{
+  beforeEach(()=>{const values=new Map<string,string>();vi.stubGlobal('localStorage',{getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>values.set(key,value)});const products=signal(PRODUCTS);const catalog={items:products,products,loading:signal(false),error:signal(null),nextCursor:signal(null),ensureLoaded(){},refresh:async()=>{},loadMore:async()=>{},checkProduct:async(id:string)=>products().find(p=>p.id===id)!};TestBed.configureTestingModule({providers:[provideRouter(routes), { provide: CUSTOMER_SESSION, useValue: signal({ customerId: 'local-preview' }) }, { provide: PLANNING_PRODUCTS, useValue: products }, { provide: PublicCatalogService, useValue: catalog }]});});
+  afterEach(()=>{TestBed.inject(Dialog).closeAll();vi.unstubAllGlobals();});
+  const settle=async(harness:RouterTestingHarness)=>{harness.fixture.detectChanges();await harness.fixture.whenStable();};
+  const bomPage=(harness:RouterTestingHarness)=>harness.routeDebugElement!.query(node=>node.componentInstance instanceof ProjectBomPage)!.componentInstance as ProjectBomPage;
+  it('cancels chooser/wizard without writes and opens one dialog with the shared wizard',async()=>{
+    const harness=await RouterTestingHarness.create('/catalog');
+    const button=harness.routeNativeElement!.querySelector<HTMLButtonElement>('[aria-label="Add 620W N-Type Bifacial Solar Panel to project"]')!;
+    button.click();await settle(harness);
+    const dialog=TestBed.inject(Dialog); const chooser=dialog.openDialogs[0].componentInstance as AddToProjectDialog;
+    chooser.quantity.set(200);chooser.createNew();await settle(harness);
+    expect(dialog.openDialogs).toHaveLength(1);
+    expect(document.querySelector('app-new-project-wizard')).not.toBeNull();
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(TestBed.inject(ProjectService).projects()).toHaveLength(0);
+    dialog.closeAll();await settle(harness);
+    expect(localStorage.getItem(LOCAL_PROJECTS_KEY)).toBeNull();
+  });
+  it('adds to active or another project, preserves active identity, and leaves the catalog in place',async()=>{
+    const service=TestBed.inject(ProjectService);service.create(input('Active'),'active');service.create(input('Other'),'other');service.setActive('preview-active');
+    const harness=await RouterTestingHarness.create('/catalog');
+    const guestBefore=localStorage.getItem('solar.bom.v1');
+    const button=harness.routeNativeElement!.querySelector<HTMLButtonElement>('[aria-label="Add 620W N-Type Bifacial Solar Panel to project"]')!;
+    button.click();await settle(harness);
+    let chooser=TestBed.inject(Dialog).openDialogs[0].componentInstance as AddToProjectDialog;
+    let closed=firstValueFrom(TestBed.inject(Dialog).openDialogs[0].closed);
+    chooser.quantity.set(200);await chooser.add('preview-other');await settle(harness);
+    await closed;
+    expect(service.projects()[1].bom.items[0].quantity).toBe(200);expect(service.projects()[0].bom.items).toHaveLength(0);expect(service.activeProject()?.id).toBe('preview-active');
+    expect(TestBed.inject(Router).url).toBe('/catalog');await vi.waitFor(() => expect(TestBed.inject(NoticeService).message()).toContain('Item added to Other'));
+    button.click();await settle(harness);chooser=TestBed.inject(Dialog).openDialogs[0].componentInstance as AddToProjectDialog;await chooser.add('preview-active');await settle(harness);
+    expect(service.projects()[0].bom.items).toHaveLength(1);expect(localStorage.getItem('solar.bom.v1')).toBe(guestBefore);
+  });
+  it('retains chooser quantity and destination when a write fails, and retries exactly once',async()=>{
+    const service=TestBed.inject(ProjectService);service.create(input(),'one');
+    const harness=await RouterTestingHarness.create('/catalog');
+    harness.routeNativeElement!.querySelector<HTMLButtonElement>('[aria-label="Add 620W N-Type Bifacial Solar Panel to project"]')!.click();await settle(harness);
+    const chooser=TestBed.inject(Dialog).openDialogs[0].componentInstance as AddToProjectDialog;chooser.quantity.set(200);chooser.selectedId.set('preview-one');
+    const write=vi.spyOn(localStorage,'setItem').mockImplementation(()=>{throw new Error('quota');});chooser.add('preview-one');await settle(harness);
+    expect(chooser.error()).toContain('Could not save');expect(chooser.quantity()).toBe(200);expect(chooser.selectedId()).toBe('preview-one');expect(service.projects()[0].bom.items).toHaveLength(0);
+    write.mockRestore();chooser.add('preview-one');await settle(harness);expect(service.projects()[0].bom.items).toHaveLength(1);expect(TestBed.inject(Dialog).openDialogs).toHaveLength(0);
+  });
+  it('creates from a catalog item in one shared wizard with retained quantity and atomic initial BOM',async()=>{
+    const harness=await RouterTestingHarness.create('/catalog');
+    harness.routeNativeElement!.querySelector<HTMLButtonElement>('[aria-label="Add 620W N-Type Bifacial Solar Panel to project"]')!.click();await settle(harness);
+    const chooser=TestBed.inject(Dialog).openDialogs[0].componentInstance as AddToProjectDialog;chooser.quantity.set(200);chooser.createNew();await settle(harness);
+    const root=document.querySelector<HTMLElement>('[role="dialog"]')!;
+    const type=(id:string,value:string)=>{const field=root.querySelector<HTMLInputElement>('#'+id)!;field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));};
+    const select=(id:string,label:string)=>{const field=root.querySelector<HTMLSelectElement>('#'+id)!;field.value=[...field.options].find(option=>option.textContent?.trim()===label)!.value;field.dispatchEvent(new Event('change',{bubbles:true}));};
+    type('project-name','Catalog project');select('project-classification','Residential');root.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();await settle(harness);
+    select('project-configuration','Hybrid');select('project-work-scope','New installation');root.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();await settle(harness);
+    expect(root.textContent).toContain('200 × panel');expect(root.textContent).toContain('Create project and add item');expect(TestBed.inject(ProjectService).projects()).toHaveLength(0);
+    root.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();await settle(harness);
+    const service=TestBed.inject(ProjectService);expect(service.projects()).toHaveLength(1);expect(service.projects()[0].bom.items[0].quantity).toBe(200);expect(service.activeProject()).toBeNull();expect(TestBed.inject(Router).url).toBe('/catalog');expect(TestBed.inject(Dialog).openDialogs).toHaveLength(0);
+  });
+  it('renders a missing product as an unpriced selected line and keeps its quantity',async()=>{
+    const service=TestBed.inject(ProjectService);service.create(input(),'one',pendingProduct(PRODUCTS[0],200));
+    const envelope=JSON.parse(localStorage.getItem(LOCAL_PROJECTS_KEY)!);envelope.projects[0].bom.items[0].product.productId='removed-catalog-item';localStorage.setItem(LOCAL_PROJECTS_KEY,JSON.stringify(envelope));
+    TestBed.resetTestingModule();TestBed.configureTestingModule({providers:[provideRouter(routes), { provide: CUSTOMER_SESSION, useValue: signal({ customerId: 'local-preview' }) }]});
+    const harness=await RouterTestingHarness.create('/my/projects/preview-one/bom');const page=bomPage(harness);
+    expect(page.rows()).toHaveLength(1);expect(page.rows()[0].item.quantity).toBe(200);expect(page.rows()[0].total).toBeNull();expect(page.selected()).toHaveLength(1);expect(harness.routeNativeElement!.textContent).toContain('Unavailable product');expect(page.selectedCsv()).toContain('removed-catalog-item');
+  });
+  it('initializes all rows checked, preserves deselection through an editor and exports selected lines only',async()=>{
+    const service=TestBed.inject(ProjectService);service.create(input(),'one',pendingProduct(PRODUCTS[0]));service.saveFreeText('preview-one',text(),'text');
+    const harness=await RouterTestingHarness.create('/my/projects/preview-one/bom');const page=bomPage(harness);
+    expect(page.selected()).toHaveLength(2);expect(page.allChecked()).toBe(true);
+    const first=page.rows()[0].item;page.select(first.id,false);await settle(harness);
+    expect(page.partial()).toBe(true);expect(harness.routeNativeElement!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.indeterminate).toBe(true);
+    const selected=page.selectedCsv();expect(selected).toContain('External cable');expect(selected).not.toContain('OSD-620N-BF');
+    page.editor();await settle(harness);const editor=TestBed.inject(Dialog).openDialogs[0].componentInstance as BomLineEditor;
+    editor.draft.set({...text(),title:'Another requirement'});editor.save();await settle(harness);
+    expect(page.isSelected(first.id)).toBe(false);expect(page.selected()).toHaveLength(2);expect(page.rows()).toHaveLength(3);
+    page.selectAll(false);await settle(harness);expect(page.selected()).toHaveLength(0);
+    expect([...harness.routeNativeElement!.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.includes('Export selected'))!.disabled).toBe(true);
+    page.selectAll(true);expect(page.selected()).toHaveLength(3);
+    expect(page.unpriced()).toBe(2);expect(page.storeSubtotal()).toBe(6450);
+  });
+  it('retains editor inputs after failed saves and edits free text without creating catalog entries',async()=>{
+    const service=TestBed.inject(ProjectService);service.create(input(),'one');const harness=await RouterTestingHarness.create('/my/projects/preview-one/bom');const page=bomPage(harness);
+    page.editor();await settle(harness);const editor=TestBed.inject(Dialog).openDialogs[0].componentInstance as BomLineEditor;
+    editor.save();await settle(harness);expect(document.activeElement?.id).toBe('bom-line-title');expect(service.projects()[0].bom.items).toHaveLength(0);
+    editor.draft.set(text());const write=vi.spyOn(localStorage,'setItem').mockImplementation(()=>{throw new Error('quota');});editor.save();await settle(harness);
+    expect(editor.saveError()).toContain('Could not save');expect(editor.draft().title).toBe('External cable');expect(service.projects()[0].bom.items).toHaveLength(0);
+    write.mockRestore();editor.save();await settle(harness);const item=service.projects()[0].bom.items[0];
+    page.editor(item);await settle(harness);const edit=TestBed.inject(Dialog).openDialogs[0].componentInstance as BomLineEditor;edit.update('description','Changed detail');edit.save();await settle(harness);
+    expect(service.projects()[0].bom.items).toHaveLength(1);expect(service.projects()[0].bom.items[0].id).toBe(item.id);expect(PRODUCTS).toHaveLength(6);expect(page.unpriced()).toBe(1);
+  });
+  it('confirms removal, supports undo, and keeps a cancelled confirmation unchanged',async()=>{
+    const service=TestBed.inject(ProjectService);service.create(input(),'one',pendingProduct(PRODUCTS[0]));const harness=await RouterTestingHarness.create('/my/projects/preview-one/bom');const page=bomPage(harness);const item=page.rows()[0].item;
+    page.remove(item);expect(page.rows()).toHaveLength(1);
+    page.removing.set(item.id);page.removing.set(null);expect(page.rows()).toHaveLength(1);
+    page.removing.set(item.id);await page.remove(item);expect(page.rows()).toHaveLength(0);expect(page.undoAvailable()).toBe(true);await page.undo();expect(page.rows()).toHaveLength(1);expect(page.rows()[0].item.id).toBe(item.id);
+    page.editor();await settle(harness);await harness.navigateByUrl('/catalog');expect(TestBed.inject(Dialog).openDialogs).toHaveLength(0);
+  });
+});

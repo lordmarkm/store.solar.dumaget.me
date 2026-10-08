@@ -1,0 +1,81 @@
+import { Dialog } from '@angular/cdk/dialog';
+import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { routes } from '../../app.routes';
+import { ProjectService, LOCAL_PROJECTS_KEY } from '../../core/project.service';
+import { createNewProjectDraft } from '../../core/models';
+import { guestListFingerprint } from '../../core/guest-lists';
+import { AddToProjectDialog } from '../../shared/add-to-project-dialog';
+import { EquipmentListHistoryDialog } from '../../shared/equipment-list-history-dialog';
+import { Bom } from './bom';
+import { signal } from '@angular/core';
+import { CUSTOMER_SESSION } from '../../core/customer-access.service';
+import { PRODUCTS } from '../../core/demo-data';
+import { PLANNING_PRODUCTS } from '../../core/product-source';
+const input = { ...createNewProjectDraft(), name: 'Local roof', classification: 'residential' as const, configuration: 'hybrid' as const, workScope: 'new-installation' as const };
+describe('guest list destination, wizard and history UI', () => {
+  beforeEach(() => { const values = new Map<string, string>(); vi.stubGlobal('localStorage', { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => values.set(k, v) }); TestBed.configureTestingModule({ providers: [provideRouter(routes), { provide: CUSTOMER_SESSION, useValue: signal({ customerId: 'local-preview' }) }, { provide: PLANNING_PRODUCTS, useValue: signal(PRODUCTS) }] }); });
+  afterEach(() => { TestBed.inject(Dialog).closeAll(); vi.unstubAllGlobals(); });
+  const settle = async (h: RouterTestingHarness) => { for (let i = 0; i < 3; i++) { h.fixture.detectChanges(); await h.fixture.whenStable(); } };
+  const page = (h: RouterTestingHarness) => h.routeDebugElement!.query(n => n.componentInstance instanceof Bom)!.componentInstance as Bom;
+  const seed = () => { const s = TestBed.inject(ProjectService); s.ensureGuestLists(); s.setGuestQuantity('osda-620', 200); s.setGuestQuantity('rail-6', 8); s.create(input, 'one'); return s; };
+  const pending = (s: ProjectService) => ({ listId: s.currentGuestList()!.id, fingerprint: guestListFingerprint(s.currentGuestList()!) });
+  it('empty list action is disabled, has an accessible explanation and canceling destination/wizard writes nothing', async () => {
+    const h = await RouterTestingHarness.create('/draft'); const p = page(h);
+    const action = [...h.routeNativeElement!.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes('Add to project'))!;
+    expect(action.disabled).toBe(true); expect(action.getAttribute('aria-describedby')).toBe('project-sign-in-hint list-copy-hint'); expect(document.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    p.bom.add('osda-620', 200); await settle(h); const before = localStorage.getItem(LOCAL_PROJECTS_KEY);
+    p.addToProject(); await settle(h); const d = TestBed.inject(Dialog); const chooser = d.openDialogs[0].componentInstance as AddToProjectDialog;
+    expect(document.querySelector('[role="dialog"]')!.textContent).toContain('Every row is copied: 1 new project BOM line'); expect(document.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    chooser.createNew(); await settle(h); expect(d.openDialogs).toHaveLength(1); expect(document.querySelector('app-new-project-wizard')).not.toBeNull();
+    d.closeAll(); await settle(h); expect(localStorage.getItem(LOCAL_PROJECTS_KEY)).toBe(before); expect(p.bom.currentList()!.state).toBe('unlinked');
+  });
+  it('existing destination links all rows, keeps active unchanged and disables reopening copy flow', async () => {
+    const s = seed(); s.create({ ...input, name: 'Other' }, 'other'); s.setActive('preview-one');
+    const h = await RouterTestingHarness.create('/draft'); const p = page(h);
+    p.addToProject(); await settle(h); const chooser = TestBed.inject(Dialog).openDialogs[0].componentInstance as AddToProjectDialog; chooser.add('preview-other'); await settle(h);
+    expect(s.projects()[1].bom.items.map(i => i.quantity)).toEqual([200, 8]); expect(s.projects()[0].bom.items).toHaveLength(0); expect(s.activeProject()?.id).toBe('preview-one');
+    expect(h.routeNativeElement!.textContent).toContain('Linked to Other'); expect(h.routeNativeElement!.textContent).toContain('Later edits never sync');
+    p.addToProject(); expect(TestBed.inject(Dialog).openDialogs).toHaveLength(0);
+    expect([...h.routeNativeElement!.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes('Add to project'))!.disabled).toBe(true);
+  });
+  it('retains all rows and project fields through wizard review and failed save, then retries atomically', async () => {
+    const s = seed(); const h = await RouterTestingHarness.create('/draft'); const p = page(h); p.addToProject(); await settle(h);
+    (TestBed.inject(Dialog).openDialogs[0].componentInstance as AddToProjectDialog).createNew(); await settle(h);
+    const wizard = TestBed.inject(Dialog).openDialogs[0].componentRef!.location.nativeElement.querySelector('app-new-project-wizard') as HTMLElement;
+    const root = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    const type = (id: string, v: string) => { const el = root.querySelector<HTMLInputElement>('#'+id)!; el.value=v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    const select = (id: string, label: string) => { const el=root.querySelector<HTMLSelectElement>('#'+id)!; el.value=[...el.options].find(o=>o.textContent?.trim()===label)!.value; el.dispatchEvent(new Event('change', { bubbles: true })); };
+    expect(wizard).not.toBeNull(); type('project-name','Guest list project'); select('project-classification','Commercial'); root.querySelector<HTMLButtonElement>('button[type="submit"]')!.click(); await settle(h);
+    select('project-configuration','Hybrid'); select('project-work-scope','New installation'); root.querySelector<HTMLButtonElement>('button[type="submit"]')!.click(); await settle(h);
+    expect(root.textContent).toContain('200 × panel'); expect(root.textContent).toContain('8 × kit'); expect(root.textContent).toContain('every equipment row (2 lines)');
+    const before=localStorage.getItem(LOCAL_PROJECTS_KEY); const write=vi.spyOn(localStorage,'setItem').mockImplementation(()=>{throw new Error('quota');}); root.querySelector<HTMLButtonElement>('button[type="submit"]')!.click(); await vi.waitFor(() => expect(root.textContent).toContain('Could not save')); await settle(h);
+    expect(root.textContent).toContain('Could not save'); expect(root.textContent).toContain('Guest list project'); expect(s.projects()).toHaveLength(1); expect(s.currentGuestList()!.state).toBe('unlinked'); expect(localStorage.getItem(LOCAL_PROJECTS_KEY)).toBe(before);
+    write.mockRestore(); root.querySelector<HTMLButtonElement>('button[type="submit"]')!.click(); await vi.waitFor(() => expect(TestBed.inject(Dialog).openDialogs).toHaveLength(0)); await settle(h);
+    expect(s.projects()).toHaveLength(2); expect(s.projects()[1].bom.items).toHaveLength(2); expect(s.currentGuestList()!.state).toBe('linked'); expect(TestBed.inject(Dialog).openDialogs).toHaveLength(0);
+  });
+  it('new-list cancel preserves state; confirm and history reopen retain latest edits and cannot recopy', async () => {
+    const s=seed(); s.copyGuestList('preview-one',pending(s),'copy'); s.setGuestQuantity('osda-620',201); const old=s.currentGuestList()!.id;
+    const h=await RouterTestingHarness.create('/draft'); const p=page(h); const before=localStorage.getItem(LOCAL_PROJECTS_KEY);
+    p.listDialog('start-new'); await settle(h); (TestBed.inject(Dialog).openDialogs[0].componentInstance as EquipmentListHistoryDialog).close(); await settle(h); expect(localStorage.getItem(LOCAL_PROJECTS_KEY)).toBe(before);
+    p.listDialog('start-new'); await settle(h); (TestBed.inject(Dialog).openDialogs[0].componentInstance as EquipmentListHistoryDialog).startNew(); await settle(h);
+    expect(p.bom.lineCount()).toBe(0); expect(s.guestHistory()!.lists).toHaveLength(2); expect(s.currentGuestList()!.state).toBe('unlinked');
+    p.listDialog('history'); await settle(h); const dialog=TestBed.inject(Dialog).openDialogs[0].componentInstance as EquipmentListHistoryDialog; dialog.reopen(s.guestHistory()!.lists.find(l=>l.id===old)!); await settle(h);
+    expect(p.bom.quantity('osda-620')).toBe(201); expect(h.routeNativeElement!.textContent).toContain('Linked to Local roof'); expect([...h.routeNativeElement!.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.includes('Add to project'))!.disabled).toBe(true);
+    expect(s.projects()[0].bom.items[0].quantity).toBe(200);
+  });
+  it('foreign linked owner hides project title and link in page/history while keeping copy disabled', async () => {
+    const s=seed(); s.copyGuestList('preview-one',pending(s),'copy'); const data=JSON.parse(localStorage.getItem(LOCAL_PROJECTS_KEY)!); data.guestHistory.lists[0].copyReceipt.customerId='foreign-user'; localStorage.setItem(LOCAL_PROJECTS_KEY,JSON.stringify(data));
+    TestBed.resetTestingModule(); TestBed.configureTestingModule({providers:[provideRouter(routes), { provide: PLANNING_PRODUCTS, useValue: signal(PRODUCTS) }]}); const h=await RouterTestingHarness.create('/draft'); const p=page(h);
+    expect(p.linkedProject()).toBeNull(); expect(h.routeNativeElement!.textContent).not.toContain('Linked to Local roof'); expect(h.routeNativeElement!.querySelector('a[href="/my/projects/preview-one/bom"]')).toBeNull();
+    p.listDialog('history'); await settle(h); expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain('Local roof'); expect(document.querySelector('[role="dialog"]')!.textContent).toContain('project unavailable');
+  });
+  it('navigation closes local dialog and blocked copies preserve pending source/selection for retry', async () => {
+    const s=seed(); const h=await RouterTestingHarness.create('/draft'); const p=page(h); p.addToProject(); await settle(h);
+    const chooser=TestBed.inject(Dialog).openDialogs[0].componentInstance as AddToProjectDialog; chooser.selectedId.set('preview-one'); s.setGuestQuantity('osda-620',201); chooser.add('preview-one'); await settle(h);
+    expect(chooser.error()).toContain('changed'); expect(chooser.selectedId()).toBe('preview-one'); expect(s.currentGuestList()!.state).toBe('unlinked'); expect(s.projects()[0].bom.items).toHaveLength(0);
+    await h.navigateByUrl('/catalog'); await settle(h); expect(TestBed.inject(Dialog).openDialogs).toHaveLength(0);
+  });
+});

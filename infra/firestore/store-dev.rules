@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// API-only prototype for named database store-dev in dumaget-me-solar.
+// customers/{base64url(UTF8(uid))}: server-owned schemaVersion, version, profile.
+// Profile includes owner UID, email, name, optional contact/company details,
+// and immutable createdAt / server-controlled updatedAt ISO strings.
+// No browser query or CRUD operation is permitted on any path, even for admins.
+// The Admin SDK bypasses these rules: API authorization, validation and IAM
+// must be reviewed separately. No client-side validators grant access here.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
