@@ -12,21 +12,28 @@ import type { ProfileRepository } from './customer-profile.js';
 import { FirestoreProfileRepository } from './profile.repository.js';
 import { FirestoreAccountProjectRepository } from './project.repository.js';
 import type { AccountProjectRepository } from './project.repository.js';
-import { parseActiveProjectInput, parseCreateProject, parseProjectCommand, parseProjectCursor } from './customer-projects.js';
-import { parseCursor, parseProductInput, parseSupplierInput, parseProductId, parseProductUpdate, parseProductCommand, parseReferenceIds } from './admin-catalog.js';
+import { parseActiveProjectInput, parseCreateProject, parseProjectCommand, parseProjectListQuery, parseProjectManagement } from './customer-projects.js';
+import { parseCursor, parseProductInput, parseSupplierInput, parseProductId, parseProductUpdate, parseProductCommand, parseReferenceIds, parsePublishedProductQuery } from './admin-catalog.js';
 import type { AdminCatalogRepository } from './admin-catalog.js';
 import { FirestoreAdminCatalogRepository } from './admin-catalog.repository.js';
 import { CloudProductImageStore, MAX_IMAGE_BYTES } from './product-images.js';
 import type { ProductImageStore } from './product-images.js';
 import { ProductImageLifecycle } from './product-image-lifecycle.js';
 import { parseProductQuery, parseBrandCursor, parseSupplierUpdate, parseSupplierStatus } from './admin-catalog.js';
+import { parseSupplierQuery } from './admin-catalog.js';
+import { CachedReadiness } from './readiness.js';
+import { FirestoreInventoryRepository } from './inventory.repository.js';
+import { parseLocationInput, parseLocationUpdate, parseStockInput, parseCountInput, parseTransferInput, parseSettingsInput, parseInventoryQuery, parseMovementCursor } from './inventory.js';
+import type { InventoryRepository } from './inventory.js';
 
-export function buildApp(config: ApiConfig, options: { verifier?: IdentityVerifier; profiles?: ProfileRepository; catalog?: AdminCatalogRepository; projects?: AccountProjectRepository; images?: ProductImageStore; logger?: boolean } = {}) {
+export function buildApp(config: ApiConfig, options: { verifier?: IdentityVerifier; profiles?: ProfileRepository; catalog?: AdminCatalogRepository; projects?: AccountProjectRepository; images?: ProductImageStore; inventory?: InventoryRepository; readinessProbe?: () => Promise<void>; logger?: boolean } = {}) {
   const gateway = new FirebaseGateway(config);
   const verifier = options.verifier ?? gateway;
+  const readiness = new CachedReadiness(options.readinessProbe ?? (() => gateway.checkReadiness()));
   const profiles = options.profiles ?? new FirestoreProfileRepository(() => gateway.firestore());
   const imageLifecycle = !options.catalog && !options.images ? new ProductImageLifecycle(() => gateway.firestore(), () => gateway.imageBucket()) : undefined;
   const catalog = options.catalog ?? new FirestoreAdminCatalogRepository(() => gateway.firestore(), undefined, imageLifecycle);
+  const inventory = options.inventory ?? new FirestoreInventoryRepository(() => gateway.firestore(), catalog, undefined, uids => gateway.actorNames(uids));
   const projects = options.projects ?? new FirestoreAccountProjectRepository(() => gateway.firestore());
   const images = options.images ?? new CloudProductImageStore(() => gateway.imageBucket(), imageLifecycle);
   const app = Fastify({
@@ -53,6 +60,7 @@ export function buildApp(config: ApiConfig, options: { verifier?: IdentityVerifi
     allowedHeaders: ['Authorization', 'Content-Type'],
   });
   app.addHook('onClose', async () => {
+    readiness.close();
     try { await verifier.close(); }
     finally { if (verifier !== gateway) await gateway.close(); }
   });
@@ -77,10 +85,10 @@ export function buildApp(config: ApiConfig, options: { verifier?: IdentityVerifi
   // Register routes after plugins have booted so onRoute-based limits apply.
   app.register(async (routes) => {
     routes.get('/health', async () => ({ status: 'ok', service: 'solar-store-api' }));
-    routes.get('/ready', async () => {
-      // A process health check must not imply cloud readiness.
-      // Profile wiring exists, but live Auth/database activation and probes remain pending.
-      throw new ApiError(503, 'BACKEND_NOT_READY', 'Connected backend readiness is not implemented.');
+    routes.get('/ready', async (_request, reply) => {
+      const ready = config.firebaseEnabled && config.authSetupApproved && await readiness.check();
+      if (!ready) reply.header('Retry-After', '60');
+      return reply.code(ready ? 200 : 503).send({ status: ready ? 'ready' : 'not-ready', service: 'solar-store-api' });
     });
     routes.get('/api/v1/me', async (request) => {
       if (!config.firebaseEnabled || !config.authSetupApproved) {
@@ -111,7 +119,8 @@ export function buildApp(config: ApiConfig, options: { verifier?: IdentityVerifi
     });
     routes.get('/api/v1/me/projects', async request => {
       const identity = await self(request.headers.authorization);
-      return projects.list(identity, parseProjectCursor(request.query));
+      const { cursor, filters } = parseProjectListQuery(request.query);
+      return projects.list(identity, cursor, filters);
     });
     routes.get('/api/v1/me/projects/:id', async request => {
       const identity = await self(request.headers.authorization);
@@ -128,6 +137,11 @@ export function buildApp(config: ApiConfig, options: { verifier?: IdentityVerifi
       const id = parseProductId((request.params as { id?: unknown }).id);
       return projects.command(identity, id, parseProjectCommand(request.body));
     });
+    routes.post('/api/v1/me/projects/:id/management', async request => {
+      const identity = await self(request.headers.authorization);
+      const id = parseProductId((request.params as { id?: unknown }).id);
+      return projects.manage(identity, id, parseProjectManagement(request.body));
+    });
     routes.put('/api/v1/me/project-active', async request => {
       const identity = await self(request.headers.authorization);
       return projects.setActive(identity, parseActiveProjectInput(request.body));
@@ -137,6 +151,60 @@ export function buildApp(config: ApiConfig, options: { verifier?: IdentityVerifi
       requireAdmin(identity, config);
       return identity;
     };
+    routes.get('/api/v1/admin/inventory/locations', async request => {
+      await admin(request.headers.authorization);
+      return inventory.locations(parseCursor(request.query));
+    });
+    routes.post('/api/v1/admin/inventory/locations', async (request, reply) => {
+      const identity = await admin(request.headers.authorization);
+      if (Object.keys(request.query as object).length) throw new ApiError(400, 'INVALID_REQUEST', 'Unexpected query.');
+      return reply.code(201).send({ location: await inventory.createLocation(identity, parseLocationInput(request.body)) });
+    });
+    routes.put('/api/v1/admin/inventory/locations/:id', async request => {
+      const identity = await admin(request.headers.authorization);
+      if (Object.keys(request.query as object).length) throw new ApiError(400, 'INVALID_REQUEST', 'Unexpected query.');
+      return { location: await inventory.updateLocation(identity, parseProductId((request.params as { id: string }).id), parseLocationUpdate(request.body)) };
+    });
+    routes.get('/api/v1/admin/inventory/:locationId', async request => {
+      await admin(request.headers.authorization);
+      const { cursor, filters } = parseInventoryQuery(request.query);
+      return inventory.list(parseProductId((request.params as { locationId: string }).locationId), cursor, filters);
+    });
+    routes.get('/api/v1/admin/inventory/:locationId/products/:productId/movements', async request => {
+      await admin(request.headers.authorization);
+      const params = request.params as { productId: string; locationId: string };
+      return inventory.movements(parseProductId(params.productId), parseProductId(params.locationId), parseMovementCursor(request.query));
+    });
+    routes.post('/api/v1/admin/inventory/:locationId/products/:productId/adjustments', async request => {
+      const identity = await admin(request.headers.authorization);
+      if (Object.keys(request.query as object).length) throw new ApiError(400, 'INVALID_REQUEST', 'Unexpected query.');
+      const params = request.params as { productId: string; locationId: string };
+      return inventory.adjust(identity, parseProductId(params.productId), parseProductId(params.locationId), parseStockInput(request.body));
+    });
+    routes.get('/api/v1/admin/inventory/:locationId/products/:productId', async request => {
+      await admin(request.headers.authorization);
+      if (Object.keys(request.query as object).length) throw new ApiError(400, 'INVALID_REQUEST', 'Unexpected query.');
+      const params = request.params as { productId: string; locationId: string };
+      return inventory.row(parseProductId(params.productId), parseProductId(params.locationId));
+    });
+    routes.post('/api/v1/admin/inventory/:locationId/products/:productId/counts', async request => {
+      const identity = await admin(request.headers.authorization);
+      if (Object.keys(request.query as object).length) throw new ApiError(400, 'INVALID_REQUEST', 'Unexpected query.');
+      const params = request.params as { productId: string; locationId: string };
+      return inventory.count(identity, parseProductId(params.productId), parseProductId(params.locationId), parseCountInput(request.body));
+    });
+    routes.post('/api/v1/admin/inventory/:locationId/products/:productId/transfers', async request => {
+      const identity = await admin(request.headers.authorization);
+      if (Object.keys(request.query as object).length) throw new ApiError(400, 'INVALID_REQUEST', 'Unexpected query.');
+      const params = request.params as { productId: string; locationId: string };
+      return inventory.transfer(identity, parseProductId(params.productId), parseProductId(params.locationId), parseTransferInput(request.body));
+    });
+    routes.put('/api/v1/admin/inventory/:locationId/products/:productId/settings', async request => {
+      const identity = await admin(request.headers.authorization);
+      if (Object.keys(request.query as object).length) throw new ApiError(400, 'INVALID_REQUEST', 'Unexpected query.');
+      const params = request.params as { productId: string; locationId: string };
+      return { settings: await inventory.settings(identity, parseProductId(params.productId), parseProductId(params.locationId), parseSettingsInput(request.body)) };
+    });
     // Authenticate before buffering/decoding large image bodies. Other JSON routes retain 64 KiB.
     routes.register(async imageRoutes => {
       imageRoutes.addContentTypeParser(['image/jpeg', 'image/png', 'image/webp'], { parseAs: 'buffer' },
@@ -154,7 +222,8 @@ export function buildApp(config: ApiConfig, options: { verifier?: IdentityVerifi
     });
     routes.get('/api/v1/admin/suppliers', async request => {
       await admin(request.headers.authorization);
-      return catalog.suppliers(parseCursor(request.query));
+      const { cursor, filters } = parseSupplierQuery(request.query);
+      return catalog.suppliers(cursor, filters);
     });
     routes.post('/api/v1/admin/suppliers', async (request, reply) => {
       const identity = await admin(request.headers.authorization);
@@ -219,7 +288,8 @@ export function buildApp(config: ApiConfig, options: { verifier?: IdentityVerifi
     };
     routes.get('/api/v1/catalog/products', async request => {
       publicCatalog();
-      return catalog.publishedProducts(parseCursor(request.query));
+      const { cursor, filters } = parsePublishedProductQuery(request.query);
+      return catalog.publishedProducts(cursor, filters);
     });
     routes.get('/api/v1/catalog/products/:id', async request => {
       publicCatalog();

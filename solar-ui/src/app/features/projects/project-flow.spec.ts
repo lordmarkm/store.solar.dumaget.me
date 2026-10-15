@@ -25,6 +25,7 @@ describe('My projects and overview', () => {
 
   it('shows the empty state, opens only one shared wizard, and cancels without creating a project', async () => {
     const harness = await RouterTestingHarness.create('/my/projects');
+    await harness.fixture.whenStable(); harness.detectChanges();
     const page = harness.routeNativeElement!;
     expect(page.textContent).toContain('Start with your first project');
     expect(page.querySelectorAll('main')).toHaveLength(1);
@@ -42,6 +43,7 @@ describe('My projects and overview', () => {
 
   it('creates through the shared wizard then opens the saved overview with an empty BOM', async () => {
     const harness = await RouterTestingHarness.create('/my/projects');
+    await harness.fixture.whenStable(); harness.detectChanges();
     const button = [...harness.routeNativeElement!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'New project')!;
     button.click(); harness.fixture.detectChanges(); await harness.fixture.whenStable();
     const root = document.querySelector<HTMLElement>('[role="dialog"]')!;
@@ -72,7 +74,7 @@ describe('My projects and overview', () => {
     service.create(projectInput('House roof'), 'house');
     service.create({ ...projectInput('Farm'), classification: 'agricultural', location: 'Valencia' }, 'farm');
     const harness = await RouterTestingHarness.create('/my/projects');
-    const search = harness.routeNativeElement!.querySelector<HTMLInputElement>('#project-search')!;
+    const search = harness.routeNativeElement!.querySelector<HTMLInputElement>('#project-filter-search')!;
     search.value = 'Valencia'; search.dispatchEvent(new Event('input', { bubbles: true }));
     harness.fixture.detectChanges(); await harness.fixture.whenStable();
     const cards = harness.routeNativeElement!.querySelectorAll('article');

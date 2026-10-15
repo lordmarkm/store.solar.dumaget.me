@@ -5,6 +5,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { PRODUCTS, SUPPLIERS } from '../../core/demo-data';
+import { KtuiTable, KtuiTableColumn } from '../../shared/ktui-table';
 import { ProductDialog } from '../../shared/product-dialog';
 import { ProductVisualComponent } from '../../shared/product-visual';
 import { Tooltip } from '../../shared/tooltip';
@@ -18,7 +19,7 @@ import { PreviewDraftDialog } from './preview-draft-dialog';
 
 @Component({
   selector: 'app-products',
-  imports: [CurrencyPipe, DatePipe, FormsModule, RouterLink, ProductVisualComponent, Tooltip],
+  imports: [CurrencyPipe, DatePipe, FormsModule, RouterLink, ProductVisualComponent, KtuiTable, KtuiTableColumn, Tooltip],
   templateUrl: './products.html',
 })
 export class ProductsPage {
@@ -38,6 +39,7 @@ export class ProductsPage {
   readonly query = signal<ProductListQuery>(DEFAULT_PRODUCT_QUERY);
   readonly filtered = computed(() => filterProductList(this.rows(), this.query()));
   readonly result = computed(() => paginateProductList(this.filtered(), this.query()));
+  readonly tableRowKey = (row: AdminProductListRow): string => row.product.id;
   readonly hasFilters = computed(() => {
     const query = this.query();
     return !!(query.search || query.brand || query.category || query.supplier || query.state !== 'all');
@@ -71,6 +73,7 @@ export class ProductsPage {
     const size = Number(value);
     if (PRODUCT_PAGE_SIZES.includes(size as ProductPageSize)) this.update({ pageSize: size as ProductPageSize });
   }
+  supplierName(id: string): string { return this.suppliers().find(supplier => supplier.id === id)?.name ?? 'Supplier not found'; }
   previous(): void { if (this.result().page > 1) this.update({ page: this.result().page - 1 }); }
   next(): void { if (this.result().page < this.result().pageCount) this.update({ page: this.result().page + 1 }); }
   detail(row: AdminProductListRow): void {

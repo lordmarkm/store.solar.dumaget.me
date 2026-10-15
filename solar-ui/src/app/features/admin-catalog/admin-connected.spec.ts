@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import { Component, computed, signal, type WritableSignal } from '@angular/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,7 @@ import { ToastService } from '../../core/toast.service';
 import { AdminProductCreatePage } from './admin-product-create';
 import { AdminProductsPage } from './admin-products';
 import { AdminSupplierCreatePage } from './admin-supplier-create';
+import { ProductLightboxDirective } from '../../shared/product-lightbox';
 
 @Component({ template: '' })
 class RouteTargetStub {}
@@ -85,6 +87,8 @@ describe('connected admin catalog components', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('North Solar');
+    expect(fixture.nativeElement.textContent).not.toContain(supplier.id);
+    expect(fixture.nativeElement.textContent).not.toContain(product.id);
     const page = fixture.componentInstance;
     api.listProducts.mockResolvedValueOnce({ items: [], nextCursor: null });
     page.setSupplierId('some-other-id');
@@ -99,6 +103,29 @@ describe('connected admin catalog components', () => {
     expect(api.listProducts).toHaveBeenLastCalledWith(null, { supplierId: supplier.id });
     expect(page.rows().map(row => row.id)).toEqual([product.id]);
     expect(fixture.nativeElement.textContent).toContain('Panel One');
+  });
+
+  it('binds actual product thumbnails to the shared full-photo viewer without fake image actions', async () => {
+    const photos = [{ id: 'a'.repeat(64), url: 'https://example.test/detail.webp', thumbnailUrl: 'https://example.test/thumb.webp', width: 1200, height: 900 }];
+    api.listProducts.mockResolvedValueOnce({ items: [{ ...product, images: photos }, { ...product, id: 'no-photo-id', name: 'No photo' }], nextCursor: null });
+    accessStatus.set('authorized');
+    const fixture = TestBed.createComponent(AdminProductsPage);
+    fixture.detectChanges(); await fixture.whenStable(); fixture.detectChanges();
+    const triggers = fixture.debugElement.queryAll(By.directive(ProductLightboxDirective));
+    expect(triggers).toHaveLength(1);
+    const directive = triggers[0].injector.get(ProductLightboxDirective);
+    expect(directive.productLightbox()).toEqual(photos);
+    expect(directive.lightboxLabel()).toBe(product.name);
+    expect(directive.lightboxIndex()).toBe(0);
+    const button = triggers[0].nativeElement as HTMLButtonElement;
+    expect(button.getAttribute('aria-label')).toBe('Enlarge Panel One');
+    expect(button.title).toBe('Enlarge Panel One');
+    expect(button.querySelector('img')?.getAttribute('src')).toBe(photos[0].thumbnailUrl);
+    expect(fixture.nativeElement.textContent).toContain('No photo');
+    expect(fixture.nativeElement.textContent).not.toContain('no-photo-id');
+    fixture.componentInstance.suppliers.set([]); fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Supplier record not loaded');
+    expect(fixture.nativeElement.textContent).not.toContain(supplier.id);
   });
 
   it('shows panel parameters only for Panels and submits their reviewed values', async () => {
@@ -119,6 +146,52 @@ describe('connected admin catalog components', () => {
     expect(toast.success).toHaveBeenCalledWith('Product saved.');
   });
 
+  it('requires exact MCB type and amperage before creating a Protection product', async () => {
+    accessStatus.set('authorized');
+    const fixture = TestBed.createComponent(AdminProductCreatePage);
+    fixture.detectChanges(); await fixture.whenStable(); fixture.detectChanges();
+    const page = fixture.componentInstance;
+    page.update('sku', 'MCB-1'); page.update('name', 'MCB'); page.update('supplierId', supplier.id);
+    page.update('category', 'Circuit breakers'); page.update('protectionType', 'MCB'); page.update('mcbType', 'DC');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('#product-mcbType')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('#product-mcbAmperage')).not.toBeNull();
+    for (const amperage of ['16A', '16.5oops', '0', 'NaN', '9007199254740992']) {
+      page.update('mcbAmperage', amperage);
+      await page.save();
+      expect(api.createProduct).not.toHaveBeenCalled();
+      expect(page.showError('mcbAmperage')).toBeTruthy();
+    }
+    page.update('mcbAmperage', '0.75');
+    await page.save();
+    expect(api.createProduct).toHaveBeenCalledWith(expect.objectContaining({
+      category: 'Circuit breakers', protectionType: 'MCB', mcbSpecifications: { type: 'DC', amperage: 0.75 },
+    }));
+  });
+
+  it('creates ATS Protection without requiring or sending MCB ratings', async () => {
+    accessStatus.set('authorized');
+    const fixture = TestBed.createComponent(AdminProductCreatePage);
+    fixture.detectChanges(); await fixture.whenStable(); fixture.detectChanges();
+    const page = fixture.componentInstance;
+    page.update('sku', 'ATS-1'); page.update('name', 'Automatic transfer switch'); page.update('supplierId', supplier.id);
+    page.update('category', 'ATS'); page.update('protectionType', 'ATS');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('#product-mcbType')).toBeNull();
+    expect(fixture.nativeElement.querySelector('#product-atsAmperage')).not.toBeNull();
+    for (const amperage of ['', '0', '-1', 'NaN', '16A', '9007199254740992']) {
+      page.update('atsAmperage', amperage);
+      await page.save();
+      expect(api.createProduct).not.toHaveBeenCalled();
+      expect(page.showError('atsAmperage')).toBeTruthy();
+    }
+    page.update('atsAmperage', '63.5');
+    await page.save();
+    expect(api.createProduct).toHaveBeenCalledWith(expect.objectContaining({ category: 'ATS', protectionType: 'ATS', atsSpecifications: { amperage: 63.5 } }));
+    const submitted = api.createProduct.mock.calls.at(-1)?.[0];
+    expect(submitted).not.toHaveProperty('mcbSpecifications');
+  });
+
   it('validates required product fields without calling the create API', async () => {
     accessStatus.set('authorized');
     const fixture = TestBed.createComponent(AdminProductCreatePage);
@@ -132,6 +205,22 @@ describe('connected admin catalog components', () => {
     expect(api.createProduct).not.toHaveBeenCalled();
     expect(page.showError('sku')).toContain('uppercase ASCII');
     expect(toast.error).toHaveBeenCalledWith('Review the highlighted fields and try again.');
+  });
+
+  it('requires and submits a Shopee product URL, trimming only its outside whitespace', async () => {
+    accessStatus.set('authorized');
+    api.listSuppliers.mockResolvedValueOnce({ items: [{ ...supplier, name: ' Shopee ' }], nextCursor: null });
+    const fixture = TestBed.createComponent(AdminProductCreatePage);
+    fixture.detectChanges(); await fixture.whenStable(); fixture.detectChanges();
+    const page = fixture.componentInstance;
+    page.update('sku', 'SHOPEE-1'); page.update('name', 'Shopee item'); page.update('supplierId', supplier.id);
+    await page.save();
+    expect(api.createProduct).not.toHaveBeenCalled();
+    expect(page.showError('supplierUrl')).toContain('Shopee product URL');
+    const url = 'https://shopee.ph/product/1?x=a%2Fb&source=https%3A%2F%2Fexample.com%2Fp%3Fq%3Done';
+    page.update('supplierUrl', `  ${url}  `);
+    await page.save();
+    expect(api.createProduct).toHaveBeenCalledWith(expect.objectContaining({ supplierUrl: url }));
   });
 
   it('uses exact centavos and reuses the request ID after a failed identical product submission', async () => {

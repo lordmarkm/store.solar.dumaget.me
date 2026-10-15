@@ -29,6 +29,31 @@ describe('product dialog specifications', () => {
     expect(fixture.nativeElement.querySelector('#panel-specifications-title')).toBeNull();
     expect(fixture.nativeElement.textContent).toContain('Specification');
   });
+  it('shows labeled MCB type and amperage without changing the product image', () => {
+    const product = { ...panel, category: 'Circuit breakers' as const, visual: 'combiner' as const,
+      protectionType: 'MCB' as const, mcbSpecifications: { type: 'AC' as const, amperage: 16.25 } };
+    const fixture = open(product);
+    const body = fixture.nativeElement as HTMLElement;
+    expect(body.textContent).toContain('MCB type');
+    expect(body.textContent).toContain('AC');
+    expect(body.textContent).toContain('Amperage');
+    expect(body.textContent).toContain('16.25 A');
+    expect(fixture.componentInstance.product.visual).toBe('combiner');
+  });
+  it('shows unknown ATS amperage honestly without MCB electrical details', () => {
+    const fixture = open({ ...panel, category: 'ATS', visual: 'combiner', protectionType: 'ATS' });
+    const body = fixture.nativeElement as HTMLElement;
+    expect(body.textContent).toContain('Subcategory');
+    expect(body.textContent).toContain('ATS');
+    expect(body.textContent).not.toContain('MCB type');
+    expect(body.textContent).toContain('Amperage');
+    expect(body.textContent).toContain('Not specified');
+  });
+  it('shows the separate ATS amperage including fractional ratings', () => {
+    const fixture = open({ ...panel, category: 'ATS', visual: 'combiner', protectionType: 'ATS', atsSpecifications: { amperage: 63.5 } });
+    expect(fixture.nativeElement.textContent).toContain('63.5 A');
+    expect(fixture.nativeElement.textContent).not.toContain('MCB type');
+  });
   it('switches full-size photos through gallery thumbnails without changing the primary image', () => {
     const images = ['a', 'b'].map(character => {
       const id = character.repeat(64);

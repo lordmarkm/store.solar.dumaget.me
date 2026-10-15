@@ -19,10 +19,10 @@ function supplier(): AdminSupplier {
     schemaVersion: 1, version: 1, status: 'active', createdBy: 'firebase-user-1', createdAt: timestamp, updatedAt: timestamp };
 }
 
-function product(): AdminProduct {
+function product(supplierUrl?: string): AdminProduct {
   return { id: UUID_B, sku: 'SOL-1', name: 'Solar panel', brand: 'Brand', category: 'Panels', unitCode: 'panel',
     description: '', amountMinor: 12345, supplierId: UUID_C, schemaVersion: 1, version: 1, state: 'draft', currency: 'PHP',
-    createdBy: 'firebase-user-1', createdAt: timestamp, updatedAt: timestamp };
+    createdBy: 'firebase-user-1', createdAt: timestamp, updatedAt: timestamp, ...(supplierUrl === undefined ? {} : { supplierUrl }) };
 }
 
 describe('AdminCatalogApiService', () => {
@@ -41,6 +41,33 @@ describe('AdminCatalogApiService', () => {
   });
 
   afterEach(() => TestBed.resetTestingModule());
+  it.each(['PV Isolator', 'MCCB'] as const)('accepts %s for API filtering and creation without unrelated ratings', async category => {
+    const api = TestBed.inject(AdminCatalogApiService);
+    fetcher.mockResolvedValueOnce(response({ items: [{ ...product(), category }], nextCursor: null }));
+    expect((await api.listProducts(null, { category })).items[0].category).toBe(category);
+    expect(new URL(String(fetcher.mock.calls[0][0]), 'https://store.example').searchParams.get('category')).toBe(category);
+    const input: ProductCreateInput = { requestId: UUID_A, sku: 'DEVICE-1', name: category, brand: 'Generic', category,
+      unitCode: 'unit', description: '', amountMinor: null, supplierId: UUID_C };
+    fetcher.mockResolvedValueOnce(response({ product: { ...product(), category } }));
+    expect((await api.createProduct(input)).product.category).toBe(category);
+    expect(JSON.parse(fetcher.mock.calls[1][1].body as string)).toEqual(input);
+  });
+  it('captures encoded supplier API filters and validates filtered vs unfiltered cursors', async () => {
+    const api = TestBed.inject(AdminCatalogApiService);
+    const filters = { namePrefix: 'Solar & 🌞', status: 'active' as const };
+    fetcher.mockResolvedValueOnce(response({ items: [supplier()], nextCursor: 'opaque_next' }));
+    const pending = api.listSuppliers('opaque_first', filters);
+    filters.namePrefix = 'Changed';
+    await expect(pending).resolves.toMatchObject({ nextCursor: 'opaque_next' });
+    const params = new URL(fetcher.mock.calls[0][0], 'https://store.example').searchParams;
+    expect(Object.fromEntries(params)).toEqual({ namePrefix: 'Solar & 🌞', status: 'active', cursor: 'opaque_first' });
+    await expect(api.listSuppliers('opaque_unfiltered')).rejects.toMatchObject({ code: 'invalid-input' });
+    for (const filter of [{ status: 'deleted' }, { namePrefix: '' }, { namePrefix: 'x'.repeat(161) }, { namePrefix: '\ud800' }, { unknown: 'x' }])
+      await expect(api.listSuppliers(null, filter as never)).rejects.toMatchObject({ code: 'invalid-input' });
+    fetcher.mockResolvedValueOnce(response({ items: [], nextCursor: '../escape' }));
+    await expect(api.listSuppliers(null, { status: 'active' })).rejects.toMatchObject({ code: 'invalid-response' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 
   it('uses fixed supplier/product endpoints, cursor only on GET, and captures POST inputs', async () => {
     const api = TestBed.inject(AdminCatalogApiService);
@@ -62,7 +89,7 @@ describe('AdminCatalogApiService', () => {
     expect(fetcher.mock.calls[1][0]).toBe('/api/v1/admin/suppliers');
     expect(fetcher.mock.calls[1][1].method).toBe('POST');
 
-    const productInput: ProductCreateInput = { requestId: UUID_A, sku: 'SOL-1', name: 'Solar panel', brand: 'Brand', category: 'Protection', unitCode: 'kit', description: '', amountMinor: null, supplierId: UUID_C };
+    const productInput: ProductCreateInput = { requestId: UUID_A, sku: 'SOL-1', name: 'Solar panel', brand: 'Brand', category: 'Surge Protection Device', unitCode: 'kit', description: '', amountMinor: null, supplierId: UUID_C };
     fetcher.mockImplementationOnce(async (_path, init) => {
       const posted = JSON.parse(init.body as string) as ProductCreateInput;
       expect(posted).toEqual(productInput);
@@ -71,6 +98,25 @@ describe('AdminCatalogApiService', () => {
     await expect(api.createProduct(productInput))
       .resolves.toMatchObject({ product: { category: 'Panels' } });
     expect(fetcher.mock.calls[2][0]).toBe('/api/v1/admin/products');
+  });
+
+  it('trims only outer supplier URL whitespace, accepts legacy records without the field, and rejects invalid optional values', async () => {
+    const api = TestBed.inject(AdminCatalogApiService);
+    const query = 'id=1%2F2&redirect=https%3A%2F%2Fshop.example%2Fp%3Fx%3Done';
+    const supplierUrl = `https://shop.example/item?${query}`;
+    const input: ProductCreateInput = { requestId: UUID_A, sku: 'SOL-1', name: 'Solar panel', brand: 'Brand', category: 'Surge Protection Device', unitCode: 'kit', description: '', amountMinor: null, supplierId: UUID_C, supplierUrl: `  ${supplierUrl}  ` };
+    fetcher.mockResolvedValueOnce(response({ product: product(supplierUrl) }));
+    await expect(api.createProduct(input)).resolves.toMatchObject({ product: { supplierUrl } });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body as string).supplierUrl).toBe(supplierUrl);
+    const { supplierUrl: _supplierUrl, ...legacyInput } = input;
+    fetcher.mockResolvedValueOnce(response({ product: product() }));
+    await expect(api.createProduct(legacyInput)).resolves.toMatchObject({ product: { id: UUID_B } });
+    const calls = fetcher.mock.calls.length;
+    const valid = 'https://shop.example/p';
+    for (const invalid of ['http://shop.example/p', 'https://user:pass@shop.example/p', 'https://shop.example:444/p', `https://shop.example/${'x'.repeat(2040)}`, 'https://shop.example/\ud800', 'https://shop.example/a b', 'https://shop.example\\p', `${' '.repeat(2049 - valid.length)}${valid}`]) {
+      await expect(api.createProduct({ ...input, supplierUrl: invalid })).rejects.toMatchObject({ code: 'invalid-input' });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(calls);
   });
 
   it('sends encoded server filters and opaque cursors and pages brands independently', async () => {
@@ -132,6 +178,60 @@ describe('AdminCatalogApiService', () => {
     expect(JSON.parse(fetcher.mock.calls[0][1].body).panelSpecifications).toEqual(panelSpecifications);
     fetcher.mockResolvedValueOnce(response({ items: [{ ...product(), panelSpecifications }], nextCursor: null }));
     await expect(api.listProducts()).resolves.toMatchObject({ items: [{ panelSpecifications }] });
+  });
+
+  it('accepts exact MCB fields on create and records while rejecting incomplete or out-of-category values', async () => {
+    const api = TestBed.inject(AdminCatalogApiService);
+    const input: ProductCreateInput = { requestId: UUID_A, sku: 'BREAKER-1', name: 'Breaker', brand: 'Brand', category: 'Circuit breakers',
+      unitCode: 'unit', description: '', amountMinor: null, supplierId: UUID_C, protectionType: 'MCB',
+      mcbSpecifications: { type: 'AC', amperage: 16.25 } };
+    fetcher.mockResolvedValueOnce(response({ product: { ...product(), category: 'Circuit breakers', protectionType: 'MCB', mcbSpecifications: input.mcbSpecifications } }));
+    await expect(api.createProduct(input)).resolves.toMatchObject({ product: { mcbSpecifications: { type: 'AC', amperage: 16.25 } } });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body as string)).toMatchObject({ protectionType: 'MCB', mcbSpecifications: { type: 'AC', amperage: 16.25 } });
+
+    for (const change of [
+      { mcbSpecifications: null },
+      { mcbSpecifications: { type: 'ac', amperage: 16 } },
+      { mcbSpecifications: { type: 'DC', amperage: Number.MAX_SAFE_INTEGER + 1 } },
+      { category: 'Inverters', mcbSpecifications: { type: 'DC', amperage: 16 } },
+      { category: 'Panels', protectionType: null, mcbSpecifications: { type: 'DC', amperage: 16 } },
+    ]) await expect(api.createProduct({ ...input, ...change } as never)).rejects.toMatchObject({ code: 'invalid-input' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    fetcher.mockResolvedValueOnce(response({ product: { ...product(), category: 'Circuit breakers', protectionType: 'MCB', mcbSpecifications: input.mcbSpecifications } }));
+    await expect(api.getProduct(UUID_B)).resolves.toMatchObject({ product: { mcbSpecifications: input.mcbSpecifications } });
+    fetcher.mockResolvedValueOnce(response({ product: { ...product(), category: 'Circuit breakers', protectionType: 'MCB', mcbSpecifications: { type: 'DC', amperage: 0 } } }));
+    await expect(api.getProduct(UUID_B)).rejects.toMatchObject({ code: 'invalid-response' });
+  });
+
+  it('accepts ATS Protection without MCB specifications and rejects cross-category or MCB-rated ATS input', async () => {
+    const api = TestBed.inject(AdminCatalogApiService);
+    const input: ProductCreateInput = { requestId: UUID_A, sku: 'ATS-1', name: 'Transfer switch', brand: 'Brand', category: 'ATS',
+      unitCode: 'unit', description: '', amountMinor: null, supplierId: UUID_C, protectionType: 'ATS', atsSpecifications: { amperage: 63.5 } };
+    fetcher.mockResolvedValueOnce(response({ product: { ...product(), category: 'ATS', protectionType: 'ATS', atsSpecifications: input.atsSpecifications } }));
+    await expect(api.createProduct(input)).resolves.toMatchObject({ product: { protectionType: 'ATS' } });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body as string)).toMatchObject({ protectionType: 'ATS', atsSpecifications: { amperage: 63.5 } });
+    for (const change of [
+      { category: 'Inverters' },
+      { mcbSpecifications: { type: 'AC', amperage: 16 } },
+      { mcbSpecifications: null as null, protectionType: 'MCB' },
+      { atsSpecifications: null },
+      { atsSpecifications: { amperage: 0 } },
+      { atsSpecifications: { amperage: '63' } },
+      { atsSpecifications: { amperage: 63, type: 'AC' } },
+    ]) await expect(api.createProduct({ ...input, ...change } as never)).rejects.toMatchObject({ code: 'invalid-input' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const { atsSpecifications: ignored, ...legacyInput } = input;
+    await expect(api.createProduct(legacyInput)).rejects.toMatchObject({ code: 'invalid-input' });
+    await expect(api.updateProduct(UUID_B, { ...legacyInput, expectedVersion: 1 })).rejects.toMatchObject({ code: 'invalid-input' });
+    fetcher.mockResolvedValueOnce(response({ product: { ...product(), category: 'ATS', protectionType: 'ATS', atsSpecifications: input.atsSpecifications } }));
+    await expect(api.updateProduct(UUID_B, { ...input, expectedVersion: 1 })).resolves.toMatchObject({ product: { atsSpecifications: { amperage: 63.5 } } });
+    for (const extra of [{}, { atsSpecifications: null }]) {
+      fetcher.mockResolvedValueOnce(response({ product: { ...product(), category: 'ATS', protectionType: 'ATS', ...extra } }));
+      await expect(api.getProduct(UUID_B)).resolves.toMatchObject({ product: { protectionType: 'ATS' } });
+    }
+    fetcher.mockResolvedValueOnce(response({ product: { ...product(), category: 'ATS', protectionType: 'ATS', atsSpecifications: { amperage: 0 } } }));
+    await expect(api.getProduct(UUID_B)).rejects.toMatchObject({ code: 'invalid-response' });
   });
 
   it('rejects malformed panel input before fetch and invalid panel responses', async () => {
@@ -248,7 +348,7 @@ describe('AdminCatalogApiService', () => {
     });
     await expect(api.createSupplier(input)).resolves.toMatchObject({ supplier: { id: UUID_B } });
 
-    const productInput: ProductCreateInput = { requestId: UUID_A, sku: ' lower_1 ', name: ' Product ', brand: ' Brand ', category: 'Protection', unitCode: 'kit', description: 'd'.repeat(4000), amountMinor: 99_999_999_999_999, supplierId: UUID_C.toUpperCase() };
+    const productInput: ProductCreateInput = { requestId: UUID_A, sku: ' lower_1 ', name: ' Product ', brand: ' Brand ', category: 'Surge Protection Device', unitCode: 'kit', description: 'd'.repeat(4000), amountMinor: 99_999_999_999_999, supplierId: UUID_C.toUpperCase() };
     fetcher.mockImplementationOnce(async (_path, init) => {
       const posted = JSON.parse(init.body as string);
       expect(posted).toMatchObject({ requestId: UUID_A, sku: 'LOWER_1', name: 'Product', brand: 'Brand', amountMinor: 99_999_999_999_999, supplierId: UUID_C, description: 'd'.repeat(4000) });

@@ -6,8 +6,8 @@
   </div>
   <div class="flex flex-wrap items-center gap-3">
     <a routerLink="/admin/inventory" class="kt-btn kt-btn-light"><i class="ki-outline ki-filter" aria-hidden="true"></i>View inventory</a>
-    @if (preview.enabled) { <a routerLink="/admin/products/new" [queryParams]="{ returnTo: listUrl() }" class="kt-btn kt-btn-primary"><i class="ki-outline ki-pencil" aria-hidden="true"></i>New product</a> } @else { <app-tooltip [label]="'New product: ' + mutationReason" [focusable]="true">
-      <button type="button" class="kt-btn kt-btn-primary" disabled aria-describedby="product-preview-note"><i class="ki-outline ki-pencil" aria-hidden="true"></i>New product</button>
+    @if (preview.enabled) { <a routerLink="/admin/products/new" [queryParams]="{ returnTo: listUrl() }" class="kt-btn kt-btn-primary"><i class="ki-outline ki-plus" aria-hidden="true"></i>New product</a> } @else { <app-tooltip [label]="'New product: ' + mutationReason" [focusable]="true">
+      <button type="button" class="kt-btn kt-btn-primary" disabled aria-describedby="product-preview-note"><i class="ki-outline ki-plus" aria-hidden="true"></i>New product</button>
     </app-tooltip> }
   </div>
 </div>
@@ -41,30 +41,26 @@
     </div>
   </div>
 
-  <div class="relative overflow-x-auto" role="region" aria-label="Products table, scroll horizontally for all columns" tabindex="0">
-    <table class="kt-table min-w-[1050px] text-sm">
-      <caption class="sr-only">Fixture products and development preview drafts. Fixture prices and stock are illustrative; preview drafts have no stock or live offers.</caption>
-      <thead><tr><th scope="col">Product / SKU</th><th scope="col">Category</th><th scope="col">Publication</th><th scope="col">Sample unit price</th><th scope="col">Sample allocation</th><th scope="col">Updated</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
-      <tbody>
-        @for (row of result().rows; track row.product.id) {
-          <tr>
-            <td><div class="flex items-center gap-3"><div class="product-stage flex h-12 w-16 shrink-0 items-center justify-center rounded-md">@if (row.product.visual; as visual) { <app-product-visual [kind]="visual" [images]="row.product.images" variant="thumb" [alt]="row.product.name + ' product image'" /> } @else { <span class="text-[10px] text-secondary-foreground">No image</span> }</div><div class="max-w-64"><p class="mb-1 break-all font-mono text-[10px] text-secondary-foreground">{{ row.product.sku }}</p><button type="button" class="break-words text-start font-semibold hover:text-primary hover:underline" (click)="detail(row)" [attr.aria-label]="'View ' + row.product.name + ' details'">{{ row.product.name }}</button><p class="mt-1 text-xs text-secondary-foreground">{{ row.product.brand || 'Brand not set' }} · {{ row.product.spec }}</p></div></div></td>
-            <td>{{ row.product.category || 'Not set' }}</td>
-            <td><span class="inline-flex rounded-md border border-border bg-muted px-2 py-1 text-xs font-medium">{{ stateLabels[row.publicationState] }}</span></td>
-            <td>@if (row.price; as price) { <p class="whitespace-nowrap font-semibold">{{ price.amountMinor / 100 | currency:price.currency:'symbol':'1.2-2' }}</p> } @else { <p>{{ row.previewDraft ? 'Unpriced' : 'Not recorded' }}</p> }<p class="mt-1 text-xs text-secondary-foreground">{{ row.product.unit ? 'Per ' + row.product.unit : 'Unit not set' }} · Tax unspecified</p></td>
-            <td>@if (row.product.stock !== null) { <p class="font-medium">{{ row.product.stock }} {{ row.product.unit }}{{ row.product.stock === 1 ? '' : 's' }}</p><p class="mt-1 text-xs text-secondary-foreground">{{ row.product.depot }} · Not live</p> } @else { <span class="text-xs text-secondary-foreground">Not configured</span> }</td>
-            <td><span class="text-xs text-secondary-foreground">{{ row.updatedAt ? (row.updatedAt | date:'mediumDate') : 'Not recorded' }}</span>@if (row.previewDraft) { <p class="mt-1 text-xs text-secondary-foreground">In-memory draft</p> }</td>
-            <td><div class="flex items-center gap-3">
-              <app-tooltip [label]="'View ' + row.product.sku + ' details'"><button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" (click)="detail(row)" [attr.aria-label]="'View ' + row.product.sku + ' details'" [attr.title]="'View ' + row.product.sku + ' details'"><i class="ki-outline ki-eye text-base" aria-hidden="true"></i></button></app-tooltip>
-              <app-tooltip [label]="'Edit ' + row.product.sku + ': ' + mutationReason" [focusable]="true"><button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" disabled [attr.aria-label]="'Edit ' + row.product.sku" [attr.title]="mutationReason" aria-describedby="product-preview-note"><i class="ki-outline ki-pencil text-base" aria-hidden="true"></i></button></app-tooltip>
-            </div></td>
-          </tr>
-        } @empty {
-          <tr><td colspan="7" class="py-12 text-center"><p class="font-semibold">No matching products</p><p class="mx-auto mt-2 max-w-md text-sm text-secondary-foreground">Try another search or clear your filters. Fixtures have no publication state; preview drafts disappear on refresh. Publishing and archiving are not connected.</p><button type="button" class="kt-btn kt-btn-light mt-5" (click)="reset()">Clear filters</button></td></tr>
-        }
-      </tbody>
-    </table>
-  </div>
+  @if (result().rows.length) {
+  <app-ktui-table [rows]="result().rows" [rowKey]="tableRowKey" label="Fixture products" [busy]="false">
+    <ng-template solarTableColumn="product" [solarTableColumnOf]="result().rows" header="Product / SKU" width="20%" let-row>
+      <div class="flex min-w-0 items-center gap-3"><div class="product-stage flex h-12 w-16 shrink-0 items-center justify-center rounded-md">@if (row.product.visual; as visual) { <app-product-visual [kind]="visual" [images]="row.product.images" variant="thumb" [alt]="row.product.name + ' product image'" /> } @else { <span class="text-[10px] text-secondary-foreground">No image</span> }</div><div class="min-w-0"><p class="mb-1 break-all font-mono text-[10px] text-secondary-foreground">{{ row.product.sku }}</p><button type="button" class="break-words text-start font-semibold hover:text-primary hover:underline" (click)="detail(row)" [attr.aria-label]="'View ' + row.product.name + ' details'">{{ row.product.name }}</button><p class="mt-1 text-xs text-secondary-foreground">{{ row.product.brand || 'Brand not set' }} · {{ row.product.spec }}</p></div></div>
+    </ng-template>
+    <ng-template solarTableColumn="category" [solarTableColumnOf]="result().rows" header="Category" width="10%" let-row>{{ row.product.category || 'Not set' }}</ng-template>
+    <ng-template solarTableColumn="supplier" [solarTableColumnOf]="result().rows" header="Supplier" width="13%" let-row>
+      @if (row.supplierId) { <span class="block">{{ supplierName(row.supplierId) }}</span> } @else { <span>Not assigned</span> }
+    </ng-template>
+    <ng-template solarTableColumn="publication" [solarTableColumnOf]="result().rows" header="Publication" width="11%" let-row><span class="inline-flex rounded-md border border-border bg-muted px-2 py-1 text-xs font-medium">{{ stateLabels[row.publicationState] }}</span></ng-template>
+    <ng-template solarTableColumn="price" [solarTableColumnOf]="result().rows" header="Sample unit price" width="14%" let-row>@if (row.price; as price) { <p class="font-semibold">{{ price.amountMinor / 100 | currency:price.currency:'symbol':'1.2-2' }}</p> } @else { <p>{{ row.previewDraft ? 'Unpriced' : 'Not recorded' }}</p> }<p class="mt-1 text-xs text-secondary-foreground">{{ row.product.unit ? 'Per ' + row.product.unit : 'Unit not set' }} · Tax unspecified</p></ng-template>
+    <ng-template solarTableColumn="allocation" [solarTableColumnOf]="result().rows" header="Sample allocation" width="12%" let-row>@if (row.product.stock !== null) { <p class="font-medium">{{ row.product.stock }} {{ row.product.unit }}{{ row.product.stock === 1 ? '' : 's' }}</p><p class="mt-1 text-xs text-secondary-foreground">{{ row.product.depot }} · Not live</p> } @else { <span class="text-xs text-secondary-foreground">Not configured</span> }</ng-template>
+    <ng-template solarTableColumn="updated" [solarTableColumnOf]="result().rows" header="Updated" width="10%" let-row><span class="text-xs text-secondary-foreground">{{ row.updatedAt ? (row.updatedAt | date:'mediumDate') : 'Not recorded' }}</span>@if (row.previewDraft) { <p class="mt-1 text-xs text-secondary-foreground">In-memory draft</p> }</ng-template>
+    <ng-template solarTableColumn="actions" [solarTableColumnOf]="result().rows" header="Actions" width="10%" let-row>
+      <div class="flex flex-wrap items-center gap-3"><app-tooltip [label]="'View ' + row.product.sku + ' details'"><button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" (click)="detail(row)" [attr.aria-label]="'View ' + row.product.sku + ' details'" [attr.title]="'View ' + row.product.sku + ' details'"><i class="ki-outline ki-eye text-base" aria-hidden="true"></i></button></app-tooltip><app-tooltip [label]="'Edit ' + row.product.sku + ': ' + mutationReason" [focusable]="true"><button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" disabled [attr.aria-label]="'Edit ' + row.product.sku" [attr.title]="mutationReason" aria-describedby="product-preview-note"><i class="ki-outline ki-pencil text-base" aria-hidden="true"></i></button></app-tooltip></div>
+    </ng-template>
+  </app-ktui-table>
+  } @else {
+    <section class="p-8 text-center"><p class="font-semibold">No matching products</p><p class="mx-auto mt-2 max-w-md text-sm text-secondary-foreground">Try another search or clear your filters. Fixtures have no publication state; preview drafts disappear on refresh. Publishing and archiving are not connected.</p><button type="button" class="kt-btn kt-btn-light mt-5" (click)="reset()">Clear filters</button></section>
+  }
   <footer class="kt-card-footer flex-wrap justify-between gap-4">
     <p class="text-xs text-secondary-foreground">Showing {{ result().from }}–{{ result().to }} of {{ result().total }} products · PHP</p>
     <div class="flex flex-wrap items-center gap-3">

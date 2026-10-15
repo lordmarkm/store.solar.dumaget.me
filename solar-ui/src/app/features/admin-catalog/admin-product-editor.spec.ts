@@ -41,7 +41,7 @@ describe('admin product editor', () => {
   let revision: WritableSignal<number>;
   let authorized: WritableSignal<boolean>;
   let params: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
-  let api: Record<'getProduct' | 'updateProduct' | 'publishProduct' | 'unpublishProduct' | 'listSuppliers' | 'listProducts', ReturnType<typeof vi.fn>>;
+  let api: Record<'getProduct' | 'getSupplier' | 'updateProduct' | 'publishProduct' | 'unpublishProduct' | 'listSuppliers' | 'listProducts', ReturnType<typeof vi.fn>>;
   let fixture: ComponentFixture<AdminProductEditorPage>;
   let page: AdminProductEditorPage;
   let toast: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
@@ -57,6 +57,7 @@ describe('admin product editor', () => {
     params = new BehaviorSubject(convertToParamMap({ id: ID }));
     api = {
       getProduct: vi.fn().mockResolvedValue({ product: product() }),
+      getSupplier: vi.fn().mockResolvedValue({ supplier }),
       updateProduct: vi.fn().mockResolvedValue({ product: product({ name: 'Changed', version: 2 }) }),
       publishProduct: vi.fn().mockResolvedValue({ product: product({ state: 'published', version: 2, publishedVersion: 2 }) }),
       unpublishProduct: vi.fn().mockResolvedValue({ product: product({ version: 3 }) }),
@@ -126,6 +127,108 @@ describe('admin product editor', () => {
     expect(page.dirty()).toBe(false);
   });
 
+  it('loads MCB values, preserves exact decimal amperage across retries, and clears subtype fields', async () => {
+    const mcbSpecifications = { type: 'AC' as const, amperage: 20.5 };
+    api.getProduct.mockResolvedValueOnce({ product: product({ category: 'Circuit breakers', unitCode: 'kit', protectionType: 'MCB', mcbSpecifications }) });
+    api.updateProduct.mockRejectedValueOnce(new StoreApiError('unavailable'));
+    api.updateProduct.mockResolvedValueOnce({ product: product({ category: 'Circuit breakers', unitCode: 'kit', protectionType: 'MCB', mcbSpecifications: { type: 'AC', amperage: 16.25 }, version: 2 }) });
+    await open();
+    expect(page.input()).toMatchObject({ protectionType: 'MCB', mcbType: 'AC', mcbAmperage: '20.5' });
+    expect(page.dirty()).toBe(false);
+    expect(page.checklist().find(item => item.label === 'MCB type and amperage are valid')?.ready).toBe(true);
+    page.update('mcbAmperage', '16.25');
+    await page.save();
+    const first = api.updateProduct.mock.calls[0][1];
+    expect(first).toMatchObject({ protectionType: 'MCB', mcbSpecifications: { type: 'AC', amperage: 16.25 } });
+    expect(page.input().mcbAmperage).toBe('16.25');
+    await page.save();
+    expect(api.updateProduct.mock.calls[1][1].requestId).toBe(first.requestId);
+    page.update('category', 'Inverters');
+    await page.save();
+    expect(api.updateProduct.mock.calls[2][1]).toMatchObject({ protectionType: null, mcbSpecifications: null, category: 'Inverters' });
+  });
+
+  it('preserves ATS on unrelated edits and clears MCB ratings when changing MCB to ATS', async () => {
+    api.getProduct.mockResolvedValueOnce({ product: product({ category: 'ATS', protectionType: 'ATS', atsSpecifications: { amperage: 63.5 } }) });
+    api.updateProduct.mockResolvedValueOnce({ product: product({ category: 'ATS', protectionType: 'ATS', atsSpecifications: { amperage: 63.5 }, name: 'Updated ATS', version: 2 }) });
+    await open();
+    expect(page.input().protectionType).toBe('ATS');
+    expect(page.input().atsAmperage).toBe('63.5');
+    expect(page.dirty()).toBe(false);
+    page.update('name', 'Updated ATS');
+    await page.save();
+    expect(api.updateProduct.mock.calls[0][1]).toMatchObject({ protectionType: 'ATS', category: 'ATS', atsSpecifications: { amperage: 63.5 } });
+    expect(api.updateProduct.mock.calls[0][1]).not.toHaveProperty('mcbSpecifications');
+    fixture.destroy();
+
+    api.getProduct.mockResolvedValueOnce({ product: product({ category: 'Circuit breakers', protectionType: 'MCB', mcbSpecifications: { type: 'DC', amperage: 10 } }) });
+    await open();
+    page.update('category', 'ATS');
+    expect(page.input()).toMatchObject({ protectionType: 'ATS', mcbType: '', mcbAmperage: '' });
+    page.update('atsAmperage', '63');
+    api.updateProduct.mockResolvedValueOnce({ product: product({ category: 'ATS', protectionType: 'ATS', atsSpecifications: { amperage: 63 }, version: 2 }) });
+    page.update('name', 'ATS unit');
+    await page.save();
+    expect(api.updateProduct.mock.calls[1][1]).toMatchObject({ protectionType: 'ATS', mcbSpecifications: null, atsSpecifications: { amperage: 63 } });
+  });
+
+  it.each(['missing', 'null'])('loads legacy ATS with %s ratings and requires amperage for saving and publishing', async legacy => {
+    api.getProduct.mockResolvedValueOnce({ product: product({ category: 'ATS', protectionType: 'ATS', ...(legacy === 'null' ? { atsSpecifications: null } : {}) }) });
+    await open();
+    expect(page.input().atsAmperage).toBe('');
+    expect(page.dirty()).toBe(false);
+    expect(page.canPublish()).toBe(false);
+    expect(page.checklist().find(item => item.label === 'ATS amperage is valid')?.ready).toBe(false);
+    await page.publish();
+    expect(api.publishProduct).not.toHaveBeenCalled();
+    page.update('name', 'Edited transfer switch');
+    for (const amperage of ['', '0', '-1', 'Infinity', '63A', '9007199254740992']) {
+      page.update('atsAmperage', amperage);
+      await page.save();
+      expect(api.updateProduct).not.toHaveBeenCalled();
+      expect(page.showError('atsAmperage')).toBeTruthy();
+    }
+    page.update('atsAmperage', '0.5');
+    api.updateProduct.mockResolvedValueOnce({ product: product({ category: 'ATS', protectionType: 'ATS', atsSpecifications: { amperage: 0.5 }, name: 'Edited transfer switch', version: 2 }) });
+    await page.save();
+    expect(api.updateProduct.mock.calls[0][1]).toMatchObject({ protectionType: 'ATS', atsSpecifications: { amperage: 0.5 }, amountMinor: 0, images: [productImage] });
+    expect(page.dirty()).toBe(false);
+    expect(page.canPublish()).toBe(true);
+  });
+
+  it('clears ATS ratings when changing to MCB or another category', async () => {
+    const rated = product({ category: 'ATS', protectionType: 'ATS', atsSpecifications: { amperage: 63 } });
+    api.getProduct.mockResolvedValueOnce({ product: rated });
+    await open();
+    page.update('category', 'Circuit breakers');
+    expect(page.input().atsAmperage).toBe('');
+    expect(page.errors().mcbType).toBeTruthy();
+    expect(page.errors().mcbAmperage).toBeTruthy();
+    page.update('mcbType', 'AC'); page.update('mcbAmperage', '16');
+    await page.save();
+    expect(api.updateProduct.mock.calls[0][1]).toMatchObject({ protectionType: 'MCB', atsSpecifications: null, mcbSpecifications: { type: 'AC', amperage: 16 } });
+    fixture.destroy();
+    api.getProduct.mockResolvedValueOnce({ product: rated });
+    await open();
+    page.update('category', 'Inverters');
+    expect(page.input()).toMatchObject({ protectionType: '', atsAmperage: '' });
+    await page.save();
+    expect(api.updateProduct.mock.calls[1][1]).toMatchObject({ protectionType: null, atsSpecifications: null, category: 'Inverters' });
+  });
+
+  it('marks a normalized legacy unclassified product dirty when ATS is selected', async () => {
+    api.getProduct.mockResolvedValueOnce({ product: product({ category: null, protectionType: undefined, mcbSpecifications: undefined }) });
+    await open();
+    const save = fixture.nativeElement.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(page.dirty()).toBe(false);
+    expect(save.disabled).toBe(true);
+    page.update('category', 'ATS');
+    fixture.detectChanges();
+    expect(page.input().protectionType).toBe('ATS');
+    expect(page.dirty()).toBe(true);
+    expect(save.disabled).toBe(false);
+  });
+
   it('clears stored panel fields on category change and rejects malformed panel edits', async () => {
     api.getProduct.mockResolvedValueOnce({ product: product({ panelSpecifications: { cable: '4 mm²' } }) });
     await open();
@@ -143,17 +246,19 @@ describe('admin product editor', () => {
     api.getProduct.mockResolvedValueOnce({ product: product({ brand: '', description: '', category: null, unitCode: null, amountMinor: null }) });
     api.listSuppliers.mockResolvedValueOnce({ items: [], nextCursor: SUPPLIER_ID });
     await open();
+    await vi.waitFor(() => expect(page.selectedSupplier()?.name).toBe('North Solar'));
+    fixture.detectChanges();
     expect(page.checklist().filter(item => !item.ready)).toHaveLength(6);
     const checklist = fixture.nativeElement.querySelector('[aria-labelledby="publish-checklist"]') as HTMLElement;
     expect(checklist.querySelectorAll('li .ki-cross')).toHaveLength(6);
-    expect(checklist.querySelectorAll('li .ki-check')).toHaveLength(1);
+    expect(checklist.querySelectorAll('li .ki-check')).toHaveLength(2);
     expect(checklist.querySelector('li')?.textContent).toContain('Missing');
     await page.publish();
     expect(api.publishProduct).not.toHaveBeenCalled();
-    page.update('brand', 'Sun Co'); page.update('description', 'Panel'); page.update('category', 'Protection');
+    page.update('brand', 'Sun Co'); page.update('description', 'Panel'); page.update('category', 'Surge Protection Device');
     page.update('unitCode', 'kit'); page.update('priceText', '0');
     fixture.detectChanges();
-    expect(checklist.querySelectorAll('li .ki-check')).toHaveLength(6);
+    expect(checklist.querySelectorAll('li .ki-check')).toHaveLength(7);
     expect(checklist.querySelectorAll('li .ki-cross')).toHaveLength(1);
     expect(page.checklist().find(item => item.label.includes('price'))?.ready).toBe(true);
     expect(page.canPublish()).toBe(false);
@@ -194,6 +299,36 @@ describe('admin product editor', () => {
     expect(api.publishProduct).not.toHaveBeenCalled();
     expect(fixture.nativeElement.querySelectorAll('app-product-image-uploader img')).toHaveLength(0);
     expect(fixture.nativeElement.textContent).toContain('At least one product image is uploaded');
+  });
+
+  it('round-trips supplier URLs, blocks a missing Shopee URL on save and in the publish checklist', async () => {
+    api.listSuppliers.mockResolvedValueOnce({ items: [{ ...supplier, name: 'Shopee' }], nextCursor: null });
+    await open();
+    expect(page.input().supplierUrl).toBe('');
+    expect(page.dirty()).toBe(false);
+    expect(page.checklist().find(item => item.label === 'Supplier product URL is valid')?.ready).toBe(false);
+    page.update('name', 'Changed');
+    await page.save();
+    expect(api.updateProduct).not.toHaveBeenCalled();
+    expect(page.showError('supplierUrl')).toContain('Shopee product URL');
+    const url = 'https://shopee.ph/product/1?item=a%2Fb&ref=https%3A%2F%2Fexample.com%2Fp%3Fx%3Done';
+    page.update('supplierUrl', ` ${url} `);
+    api.updateProduct.mockResolvedValueOnce({ product: product({ name: 'Changed', supplierUrl: url, version: 2 }) });
+    await page.save();
+    expect(api.updateProduct).toHaveBeenCalledWith(ID, expect.objectContaining({ supplierUrl: url }));
+    expect(page.input().supplierUrl).toBe(url);
+    expect(page.dirty()).toBe(false);
+  });
+
+  it('resolves an unloaded existing supplier before applying its Shopee URL requirement', async () => {
+    api.listSuppliers.mockResolvedValueOnce({ items: [], nextCursor: null });
+    api.getSupplier.mockResolvedValueOnce({ supplier: { ...supplier, name: 'Shopee' } });
+    await open();
+    await vi.waitFor(() => expect(page.selectedSupplier()?.name).toBe('Shopee'));
+    expect(api.getSupplier).toHaveBeenCalledWith(SUPPLIER_ID);
+    expect(page.supplierUrlRequired()).toBe(true);
+    expect(page.errors().supplierUrl).toContain('Shopee product URL');
+    expect(page.checklist().find(item => item.label === 'Supplier product URL is valid')?.ready).toBe(false);
   });
 
   it('blocks save and publish while an image upload is pending', async () => {

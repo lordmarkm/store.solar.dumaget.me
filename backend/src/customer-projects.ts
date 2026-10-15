@@ -13,9 +13,12 @@ export interface ProjectDetails {
   classificationOther?: string; installationOther?: string; location?: string; description?: string; notes?: string;
 }
 export interface ItemInput { product: { productId: string; variantId: null; unitCode: string }; quantity: number }
+export type ComponentCategory = 'Inverters' | 'Panels' | 'Batteries' | 'Mounting' | 'Circuit breakers' | 'Surge Protection Device' | 'ATS' | 'PV Isolator' | 'MCCB' | 'Other';
+export type ComponentProtectionType = 'ATS';
+export interface FreeTextProtectionMetadata { componentCategory?: ComponentCategory; componentProtectionType?: ComponentProtectionType; amperage?: number }
 interface BomBase { id: string; quantity: number; notes?: string; createdAt: string; updatedAt: string }
 export interface StoreBomItem extends BomBase { kind: 'store-product'; product: ItemInput['product'] }
-export interface FreeTextBomItem extends BomBase { kind: 'free-text'; title: string; description: string; unit: string; estimate: { kind: 'unpriced' } }
+export interface FreeTextBomItem extends BomBase, FreeTextProtectionMetadata { kind: 'free-text'; title: string; description: string; unit: string; estimate: { kind: 'unpriced' } }
 export type BomItem = StoreBomItem | FreeTextBomItem;
 export interface AccountProject extends ProjectDetails {
   id: string; schemaVersion: 1; customerId: string; version: number; status: 'draft' | 'archived';
@@ -29,11 +32,57 @@ export interface GuestListCopyReceipt {
 }
 export interface CreateProjectInput { requestId: string; details: ProjectDetails; items?: ItemInput[]; guest?: GuestCopyInput }
 export interface AddItemsCommand { requestId: string; expectedVersion: number; action: 'add-items'; items: ItemInput[]; guest?: GuestCopyInput }
-export interface FreeTextCommand { requestId: string; expectedVersion: number; action: 'free-text'; itemId?: string; input: { title: string; description: string; unit: string; quantity: number; notes: string } }
+export interface FreeTextCommand { requestId: string; expectedVersion: number; action: 'free-text'; itemId?: string; input: { title: string; description: string; unit: string; quantity: number; notes: string } & FreeTextProtectionMetadata }
 export interface QuantityCommand { requestId: string; expectedVersion: number; action: 'quantity'; itemId: string; quantity: number }
 export interface RemoveCommand { requestId: string; expectedVersion: number; action: 'remove'; itemId: string }
 export interface RestoreCommand { requestId: string; expectedVersion: number; action: 'restore'; itemId: string; index: number }
 export type ProjectCommand = AddItemsCommand | FreeTextCommand | QuantityCommand | RemoveCommand | RestoreCommand;
+export type ProjectManagementInput = { requestId: string; expectedVersion: number } & (
+  { action: 'edit-details'; details: ProjectDetails } |
+  { action: 'archive-project' | 'restore-project' | 'duplicate-project' }
+);
+export interface ProjectListQuery {
+  search?: string; status?: 'draft' | 'archived'; classification?: ProjectClassification;
+  configuration?: SystemConfiguration; workScope?: WorkScope; limit: number;
+}
+export function parseProjectManagement(value: unknown): ProjectManagementInput {
+  if (!projectObject(value) || !uuid(value['requestId']) || !version(value['expectedVersion'])) return fail();
+  const common = ['requestId', 'expectedVersion', 'action'];
+  if (value['action'] === 'edit-details' && exact(value, [...common, 'details'])) {
+    return { requestId: value['requestId'].toLowerCase(), expectedVersion: value['expectedVersion'], action: 'edit-details', details: parseProjectDetails(value['details']) };
+  }
+  if (!exact(value, common) || !['archive-project', 'restore-project', 'duplicate-project'].includes(value['action'] as string)) return fail();
+  return { requestId: value['requestId'].toLowerCase(), expectedVersion: value['expectedVersion'],
+    action: value['action'] as 'archive-project' | 'restore-project' | 'duplicate-project' };
+}
+export function parseProjectListQuery(value: unknown): { cursor: string | null; filters: ProjectListQuery } {
+  if (!projectObject(value) || Object.keys(value).some(key => !['cursor', 'search', 'status', 'classification', 'configuration', 'workScope', 'limit'].includes(key))) return fail();
+  const cursor = parseProjectCursor(value['cursor'] === undefined ? {} : { cursor: value['cursor'] });
+  const filters: ProjectListQuery = { limit: 50 };
+  if (value['limit'] !== undefined) {
+    if (typeof value['limit'] !== 'string' || !/^(10|50)$/.test(value['limit'])) return fail();
+    filters.limit = Number(value['limit']);
+  }
+  if (value['search'] !== undefined) { const term = string(value['search'], 120); if (term) filters.search = term.toLowerCase(); }
+  const allowed = {
+    status: ['draft', 'archived'],
+    classification: ['residential', 'commercial', 'industrial', 'agricultural', 'institutional-public', 'other'],
+    configuration: ['grid-tied', 'hybrid', 'off-grid', 'undecided'],
+    workScope: ['new-installation', 'expansion', 'retrofit', 'maintenance'],
+  };
+  for (const key of Object.keys(allowed) as (keyof typeof allowed)[]) {
+    if (value[key] !== undefined) {
+      if (typeof value[key] !== 'string' || !allowed[key].includes(value[key])) return fail();
+      Object.assign(filters, { [key]: value[key] });
+    }
+  }
+  return { cursor, filters };
+}
+export function matchesProjectQuery(project: AccountProject, query: ProjectListQuery): boolean {
+  return (!query.search || [project.name, project.location ?? ''].some(text => text.toLowerCase().includes(query.search!)))
+    && (!query.status || project.status === query.status) && (!query.classification || project.classification === query.classification)
+    && (!query.configuration || project.configuration === query.configuration) && (!query.workScope || project.workScope === query.workScope);
+}
 export interface ActiveProjectInput { requestId: string; expectedVersion: number | null; activeProjectId: string | null }
 
 const fail = (): never => { throw new ApiError(400, 'INVALID_PROJECT_INPUT', 'Enter valid project details and try again.'); };
@@ -90,8 +139,23 @@ function itemId(value: unknown): string {
   if (typeof value !== 'string' || !/^(product|text)-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value)) return fail(); return value;
 }
 function parseFreeText(value: unknown): FreeTextCommand['input'] {
-  if (!projectObject(value) || !exact(value, ['title', 'description', 'unit', 'quantity', 'notes']) || !quantity(value['quantity'])) return fail();
-  return { title: string(value['title'], 240, true), description: string(value['description'], 2000, false, true), unit: string(value['unit'], 80, true), quantity: value['quantity'], notes: string(value['notes'], 2000, false, true) };
+  if (!projectObject(value) || !exact(value, ['title', 'description', 'unit', 'quantity', 'notes'], ['componentCategory', 'componentProtectionType', 'amperage']) || !quantity(value['quantity'])) return fail();
+  return { title: string(value['title'], 240, true), description: string(value['description'], 2000, false, true), unit: string(value['unit'], 80, true), quantity: value['quantity'], notes: string(value['notes'], 2000, false, true), ...parseFreeTextProtectionMetadata(value['componentCategory'], value['componentProtectionType'], value['amperage']) };
+}
+function parseComponentCategory(value: unknown, legacyRead = false, protectionType?: unknown): ComponentCategory | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'Protection' && legacyRead) return protectionType === 'ATS' ? 'ATS' : 'Other';
+  if (typeof value !== 'string' || !['Inverters', 'Panels', 'Batteries', 'Mounting', 'Circuit breakers', 'Surge Protection Device', 'ATS', 'PV Isolator', 'MCCB', 'Other'].includes(value)) return fail();
+  return value as ComponentCategory;
+}
+export function parseFreeTextProtectionMetadata(categoryValue: unknown, protectionTypeValue: unknown, amperageValue: unknown, legacyRead = false): FreeTextProtectionMetadata {
+  const componentCategory = parseComponentCategory(categoryValue, legacyRead, protectionTypeValue);
+  if (protectionTypeValue !== undefined && (protectionTypeValue !== 'ATS' || componentCategory !== 'ATS')) return fail();
+  if (amperageValue !== undefined && (protectionTypeValue !== 'ATS' || typeof amperageValue !== 'number'
+    || !Number.isFinite(amperageValue) || amperageValue <= 0 || amperageValue > Number.MAX_SAFE_INTEGER)) return fail();
+  if (componentCategory === 'ATS' && protectionTypeValue !== 'ATS') return fail();
+  if (protectionTypeValue === 'ATS' && amperageValue === undefined) return fail();
+  return { ...(componentCategory ? { componentCategory } : {}), ...(protectionTypeValue ? { componentProtectionType: protectionTypeValue as ComponentProtectionType } : {}), ...(amperageValue !== undefined ? { amperage: amperageValue as number } : {}) };
 }
 export function parseBomItem(value: unknown): BomItem {
   if (!projectObject(value) || !['store-product', 'free-text'].includes(value['kind'] as string) || !quantity(value['quantity']) || !iso(value['createdAt']) || !iso(value['updatedAt'])
@@ -102,9 +166,9 @@ export function parseBomItem(value: unknown): BomItem {
     if (!exact(value, [...common, 'product'], optional) || !id.startsWith('product-')) return fail();
     return { ...base, kind: 'store-product', product: parseItemInput({ product: value['product'], quantity: value['quantity'] }).product };
   }
-  if (!exact(value, [...common, 'title', 'description', 'unit', 'estimate'], optional) || !id.startsWith('text-') || !projectObject(value['estimate'])
+  if (!exact(value, [...common, 'title', 'description', 'unit', 'estimate'], [...optional, 'componentCategory', 'componentProtectionType', 'amperage']) || !id.startsWith('text-') || !projectObject(value['estimate'])
     || !exact(value['estimate'], ['kind']) || value['estimate']['kind'] !== 'unpriced') return fail();
-  return { ...base, kind: 'free-text', title: string(value['title'], 240, true), description: string(value['description'], 2000, false, true), unit: string(value['unit'], 80, true), estimate: { kind: 'unpriced' } };
+  return { ...base, kind: 'free-text', title: string(value['title'], 240, true), description: string(value['description'], 2000, false, true), unit: string(value['unit'], 80, true), ...parseFreeTextProtectionMetadata(value['componentCategory'], value['componentProtectionType'], value['amperage'], true), estimate: { kind: 'unpriced' } };
 }
 export function parseProjectCommand(value: unknown): ProjectCommand {
   if (!projectObject(value) || !uuid(value['requestId']) || !version(value['expectedVersion']) || typeof value['action'] !== 'string') return fail();

@@ -1,8 +1,8 @@
 <div>
   <header class="mb-6 flex flex-wrap items-end justify-between gap-4">
     <div><p class="eyebrow mb-2">Administration / sourcing</p><h1 class="page-title">Suppliers</h1><p class="mt-2 text-sm text-secondary-foreground">Private supplier contact and sourcing records.</p></div>
-    @if (canAccess()) { <a routerLink="/admin/suppliers/new" class="kt-btn kt-btn-primary"><i class="ki-outline ki-check" aria-hidden="true"></i>New supplier</a> }
-    @else { <button type="button" class="kt-btn kt-btn-primary" disabled title="Administrator access is required"><i class="ki-outline ki-check" aria-hidden="true"></i>New supplier</button> }
+    @if (canAccess()) { <a routerLink="/admin/suppliers/new" class="kt-btn kt-btn-primary"><i class="ki-outline ki-plus" aria-hidden="true"></i>New supplier</a> }
+    @else { <button type="button" class="kt-btn kt-btn-primary" disabled title="Administrator access is required"><i class="ki-outline ki-plus" aria-hidden="true"></i>New supplier</button> }
   </header>
   @if (!canAccess()) {
     <section class="kt-card p-6" role="status" aria-live="polite"><h2 class="text-base font-semibold">Administrator access</h2><p class="mt-2 text-sm text-secondary-foreground">{{ statusMessage() }}</p>
@@ -10,12 +10,27 @@
       @if (access.status() === 'unavailable') { <button type="button" class="kt-btn kt-btn-light mt-5" (click)="access.retry()"><i class="ki-outline ki-arrows-circle" aria-hidden="true"></i>Retry access check</button> }
     </section>
   } @else {
-    <section class="kt-card mb-5 p-4"><label for="admin-supplier-search" class="mb-2 block text-xs font-medium">Search loaded suppliers</label><input id="admin-supplier-search" type="search" class="kt-input w-full sm:max-w-lg" placeholder="Name, region, email, phone, or website" [ngModel]="search()" (ngModelChange)="search.set($event)" /><p class="mt-2 text-xs text-secondary-foreground">Search applies to loaded records only ({{ rows().length }}).</p></section>
+    <section class="kt-card mb-5 p-4">
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="min-w-0 flex-1 basis-64">
+          <div class="mb-2 flex flex-wrap items-baseline gap-x-2"><label for="admin-supplier-name-prefix" class="text-xs font-medium">Supplier name prefix</label><span class="text-xs text-secondary-foreground">Case-sensitive</span></div>
+          <input id="admin-supplier-name-prefix" type="search" maxlength="160" class="kt-input w-full" placeholder="Enter the start of a supplier name" [ngModel]="namePrefix()" (ngModelChange)="setNamePrefix($event)" />
+        </div>
+        <div class="min-w-48 flex-1 basis-48 sm:flex-none">
+          <label for="admin-supplier-status" class="mb-2 block text-xs font-medium">Status</label>
+          <select id="admin-supplier-status" class="kt-select w-full" [ngModel]="status()" (ngModelChange)="setStatus($event)">
+            <option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option>
+          </select>
+        </div>
+        <app-tooltip label="Clear filters" class="mb-1 shrink-0"><button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" aria-label="Clear filters" title="Clear filters" (click)="clearFilters()"><i class="ki-outline ki-cross" aria-hidden="true"></i></button></app-tooltip>
+      </div>
+    </section>
     @if (error()) { <section class="kt-card mb-5 p-5" role="alert"><p class="text-sm">{{ error() }}</p><button type="button" class="kt-btn kt-btn-light mt-4" [disabled]="loading()" (click)="retry()">Retry load</button></section> }
     @if (loading() && !rows().length) { <p class="kt-card p-6 text-sm" role="status">Loading private supplier records…</p> }
-    @if (!loading() && !error() && !filtered().length) { <section class="kt-card p-8 text-center"><h2 class="text-lg font-semibold">{{ rows().length ? 'No matching suppliers' : 'No suppliers yet' }}</h2><p class="mt-2 text-sm text-secondary-foreground">{{ rows().length ? 'Try another search across the loaded records.' : 'Create a supplier to establish a private sourcing record.' }}</p></section> }
-    @if (filtered().length) { <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-      @for (supplier of filtered(); track supplier.id) { <article class="kt-card flex flex-col p-5"><header class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-base font-semibold">{{ supplier.name }}</h2><p class="mt-1 text-sm text-secondary-foreground">{{ supplier.region || 'Region not provided' }}</p></div><span class="kt-badge kt-badge-sm" [class.kt-badge-success]="supplier.status === 'active'" [class.kt-badge-outline]="supplier.status === 'inactive'">{{ supplier.status === 'active' ? 'Active' : 'Inactive' }}</span></header><p class="mt-4 whitespace-pre-wrap text-sm leading-6">{{ supplier.description || 'No description provided.' }}</p><dl class="mt-5 grid gap-3 border-t border-border pt-4 text-sm"><div><dt class="text-xs text-secondary-foreground">Email</dt><dd class="mt-1 break-all">{{ supplier.email || '—' }}</dd></div><div><dt class="text-xs text-secondary-foreground">Phone</dt><dd class="mt-1">{{ supplier.phone || '—' }}</dd></div><div><dt class="text-xs text-secondary-foreground">Website</dt><dd class="mt-1 break-all">{{ supplier.website || '—' }}</dd></div></dl><footer class="mt-5 flex flex-wrap justify-end gap-3 border-t border-border pt-4"><a [routerLink]="['/admin/suppliers', supplier.id, 'edit']" class="kt-btn kt-btn-light" [attr.aria-label]="'Edit ' + supplier.name"><i class="ki-outline ki-pencil" aria-hidden="true"></i>Edit supplier</a></footer></article> }
+    @if (searchPending()) { <p class="kt-card p-6 text-sm" role="status">Searching supplier names…</p> }
+    @if (!loading() && !searchPending() && !error() && !rows().length) { <section class="kt-card p-8 text-center"><h2 class="text-lg font-semibold">{{ supplierFilters().namePrefix || supplierFilters().status ? 'No matching suppliers' : 'No suppliers yet' }}</h2><p class="mt-2 text-sm text-secondary-foreground">{{ supplierFilters().namePrefix || supplierFilters().status ? 'Try another filter or clear the current filters.' : 'Create a supplier to establish a private sourcing record.' }}</p></section> }
+    @if (rows().length) { <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+      @for (supplier of rows(); track supplier.id) { <article class="kt-card flex flex-col p-5"><header class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-base font-semibold">{{ supplier.name }}</h2><p class="mt-1 text-sm text-secondary-foreground">{{ supplier.region || 'Region not provided' }}</p></div><span class="kt-badge kt-badge-sm" [class.kt-badge-success]="supplier.status === 'active'" [class.kt-badge-outline]="supplier.status === 'inactive'">{{ supplier.status === 'active' ? 'Active' : 'Inactive' }}</span></header><p class="mt-4 whitespace-pre-wrap text-sm leading-6">{{ supplier.description || 'No description provided.' }}</p><dl class="mt-5 grid gap-3 border-t border-border pt-4 text-sm"><div><dt class="text-xs text-secondary-foreground">Email</dt><dd class="mt-1 break-all">{{ supplier.email || '—' }}</dd></div><div><dt class="text-xs text-secondary-foreground">Phone</dt><dd class="mt-1">{{ supplier.phone || '—' }}</dd></div><div><dt class="text-xs text-secondary-foreground">Website</dt><dd class="mt-1 break-all">{{ supplier.website || '—' }}</dd></div></dl><footer class="mt-5 flex flex-wrap justify-end gap-3 border-t border-border pt-4"><a [routerLink]="['/admin/suppliers', supplier.id, 'edit']" class="kt-btn kt-btn-light" [attr.aria-label]="'Edit ' + supplier.name"><i class="ki-outline ki-pencil" aria-hidden="true"></i>Edit supplier</a></footer></article> }
     </div> }
     @if (cursor()) { <div class="mt-5 flex justify-center"><button type="button" class="kt-btn kt-btn-light" [disabled]="loading()" (click)="loadMore()">{{ loading() ? 'Loading…' : 'Load more suppliers' }}</button></div> }
   }

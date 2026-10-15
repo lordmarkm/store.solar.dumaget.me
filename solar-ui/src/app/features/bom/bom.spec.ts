@@ -60,11 +60,12 @@ it('shows retained unavailable references with unknown pricing and an explicit r
   fixture.detectChanges();
   await fixture.whenStable();
   const root = fixture.nativeElement as HTMLElement;
-  expect(root.textContent).toContain('Reference: missing-123');
+  expect(root.textContent).toContain('Unavailable product');
+  expect(root.textContent).not.toContain('missing-123');
   expect(root.textContent).toContain('Planned quantity: 42');
   expect(root.textContent).toContain('unpriced, not zero-cost');
   expect(root.textContent).not.toContain('Start with your equipment');
-  root.querySelector<HTMLButtonElement>('button[aria-label="Remove unavailable product missing-123"]')!.click();
+  root.querySelector<HTMLButtonElement>('button[aria-label="Remove unavailable product"]')!.click();
   fixture.detectChanges();
   expect(TestBed.inject(BomService).lineCount()).toBe(0);
 });

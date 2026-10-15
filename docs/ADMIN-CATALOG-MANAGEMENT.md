@@ -1,5 +1,49 @@
 # Admin catalog management
 
+Taxonomy update (2026-10-14): Protection is replaced by Circuit breakers,
+Surge Protection Device, ATS, PV Isolator and MCCB. Select these as top-level categories; see
+[category contract](PRODUCT-CATEGORIES.md) for legacy read/filter mappings.
+Explicit Circuit breakers products require
+AC/DC type and positive numeric amperage in create/edit/publication validation.
+ATS is a separate category and must not carry MCB ratings.
+ATS requires positive numeric atsSpecifications.amperage on create/Save/Publish;
+existing missing ratings remain viewable but must be completed at the next write.
+Legacy unclassified Protection reads as unclassified, without guessing a subtype. See
+[MCB specifications](MCB-SPECIFICATIONS.md) for the authoritative typed contract.
+
+## Supplier product URLs (2026-10-12)
+
+Private product create/update/master DTOs accept optional supplierUrl, canonical
+outer-trimmed text up to 2,048 characters. Keep the complete query and selected
+variant information verbatim; empty means unset. Present nonempty values must be
+HTTPS with a hostname, no credentials, non-default port, whitespace/backslashes,
+controls or unpaired surrogates. This is a link only: the server never fetches it.
+
+If the authoritative supplier name trimmed and lowercased equals shopee,
+supplierUrl is mandatory for creation, Save and Publish/republish, even for
+drafts. Accept shopee.ph and its subdomains, not lookalike hosts. The repository
+checks this with the supplier read inside the same transaction before any writes.
+The admin form exposes Supplier product URL, required hints/errors and a matching
+publication checklist. Other suppliers may optionally record an HTTPS source URL.
+
+Missing fields on old records remain readable. Do not backfill, infer values or
+block taking an old published product off sale (Unpublish). Omission in a partial
+optional-field update preserves an existing URL; explicit empty clears only when
+the current supplier does not require one. Changing to Shopee must supply a URL.
+Supplier edits that rename a source to Shopee trigger enforcement at subsequent
+product writes; they do not scan or rewrite existing products.
+
+supplierUrl stays off PublishedProduct and public projections, including public
+catalog/reference APIs. Sourcing URLs do not change inventory, price, stock,
+supplier website or publication automatically. Unknown price remains null,
+not zero; unknown images remain absent. Pictures and price are needed to publish.
+
+Verification: backend/test/supplier-product-url.test.ts covers legacy shapes,
+bounded/safe URLs, full-query persistence, Shopee host checks, private projections
+and offline transaction enforcement before writes. Frontend matching validation
+is covered by its supplier-product-url and admin catalog tests. No rules,
+indexes, edition, IAM, storage or hosting changes are needed.
+
 Implemented scope, 2026-10-09 (Asia/Manila): post-Save image cleanup, API product
 filters, supplier editing/status, and project/Auth regression repairs.
 
@@ -38,8 +82,41 @@ database, not the shared default database. Indexes consume storage and writes;
 free allowances are not a spending cap. No rule/IAM/edition/region/search-service
 change or product backfill is needed.
 
-Supplier loaded-row search and fixture inventory filtering are still migration
-debt. This slice does not represent those as complete API searches.
+Fixture inventory filtering remains migration debt. Supplier list filtering is
+now implemented as described below.
+
+## Supplier filtering (2026-10-09)
+
+GET /api/v1/admin/suppliers accepts only cursor, namePrefix and status.
+Name-prefix search is explicitly case-sensitive, trimmed, control-free, valid
+Unicode and at most 160 UTF-16 code units. It is not contact-field, substring or
+full-text search. Status is active/inactive; omitted means all statuses.
+Authorization is required before validating filters or opening private records.
+
+Unfiltered requests preserve document-ID ordering and UUID cursors so existing
+product editors and option loaders remain compatible. Filtered queries apply
+predicates in Firestore, order by name then document ID, and read at most 51
+documents for 50 visible rows. Opaque base64url cursors are bounded to 2,048
+characters, carry name/ID and a normalized-query fingerprint, and cannot be
+reused with different criteria. The Unicode scalar upper bound includes emoji
+and supplementary characters; it does not use an incomplete U+F8FF sentinel.
+Cursor pagination is a live view, not an immutable supplier snapshot.
+
+The toolbar uses a fixed All/Active/Inactive vocabulary, an explicitly labeled
+Supplier name prefix input with a case-sensitive hint, and compact same-row
+KTUI icon Clear. Text changes debounce 300 ms; criteria/Clear reset rows and
+pagination. Load more and retry retain criteria. Query, account revision,
+route and destruction fences discard stale results, including direct account
+switches where authorization remains true. No frontend rows.filter or whole
+collection download is used.
+
+One required status/name ascending composite index was added only to store-dev
+and is READY. Index storage/write overhead was reviewed; no paid search service,
+normalization backfill, edition/region/rules/IAM change or blanket index deploy.
+All six read-only live variants passed: unfiltered, each status, prefix alone,
+and prefix combined with each status. The isolated emulator additionally covers
+56 matching rows, filtered page continuity, case sensitivity, Unicode, changed
+cursor criteria, inactive selection and legacy unfiltered UUID pagination.
 
 ## Supplier editing and status
 
@@ -88,7 +165,21 @@ removing privacy, atomicity, cancellation, retry or Undo checks.
 
 ## Verification boundaries
 
-Backend checks/build and 75 unit/API tests pass. The isolated
+Product-list layout update (2026-10-11): remove the horizontal-scroll wrapper and
+760px minimum table width. Desktop uses container-sized fixed column allocation
+with wrapping names/SKUs/supplier IDs, badges and Edit actions. At 1023px and
+below, labeled cards expose the same fields/actions; API filters and loading/
+pagination behavior are unchanged. Blue KTUI styling is preserved.
+
+Live browser measurements confirm the product list/table content equals its
+container width: 682px at the default desktop size and 341px at a 390px viewport.
+Mobile document width/content both measure 375px. Inventory is independently
+verified with equal content/container widths (667px desktop, 341px mobile).
+These checks do not claim a full app/zoom audit or testing every long-value case.
+Default viewport restored; no business records changed. Automated tests remain
+skipped per the user's request.
+
+Current backend checks/build and 83 unit/API tests pass. The isolated
 emulator-admin-management.integration.ts verifies real Firestore transactions
 against a loopback demo database and synthetic bucket: post-commit ordering,
 failed-Save safety, shared/public/history-hold retention, partial-delete retries,
@@ -96,7 +187,15 @@ attach-vs-delete fencing, orphan grace, supplier uniqueness/status/replay,
 filters matching beyond 50 rows, combined filters and query-bound cursors.
 No live supplier/product/image mutations were used for those tests.
 
-Frontend production build passes. Final complete-suite results and index
-readiness are recorded in TODO.md. Browser helper availability remains limited;
+Frontend production build and full suite pass: 337 tests in 47 files.
+An initially reproduced cart-to-existing-project linked-state assertion race
+in account-project-flow.spec.ts was repaired by awaiting actual dialog completion
+before checking the result. All existing cart content, ownership, persisted BOM
+quantity and unchanged active-selection assertions remain intact; no project
+implementation or business behavior changed. The preceding batch recorded
+328/328 passing. Focused supplier/admin-connected specs pass 18 tests.
+All eight indexes are READY; product variants and six supplier read-only variants
+passed. Connected readiness and local servers are documented separately.
+Browser helper availability remains limited;
 do not claim real clipboard, responsive layout or live account UI verification
 from DOM/unit tests or compilation. No website deployment was performed.

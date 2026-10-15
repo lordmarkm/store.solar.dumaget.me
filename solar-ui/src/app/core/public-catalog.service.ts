@@ -1,26 +1,32 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { Product, ProductReference, Category, ProductVisual } from './models';
+import { PRODUCT_CATEGORIES } from './product-categories';
 import { STORE_API_FETCH } from './store-api.service';
 import { validPanelSpecifications, type PanelSpecifications } from './panel-specifications';
 import { validProductImages, type ProductImage } from './product-images';
+import { validProtectionFields, type McbSpecifications, type AtsSpecifications, type ProtectionType } from './mcb-specifications';
 
 export interface PublishedProduct {
   id: string; schemaVersion: 1; version: number; publishedAt: string; sku: string; name: string; brand: string;
-  category: Category; unitCode: 'unit' | 'panel' | 'kit'; description: string; amountMinor: number; currency: 'PHP';
+  category: Category | null; unitCode: 'unit' | 'panel' | 'kit'; description: string; amountMinor: number; currency: 'PHP';
   panelSpecifications?: PanelSpecifications | null;
+  protectionType?: ProtectionType | null;
+  mcbSpecifications?: McbSpecifications | null;
+  atsSpecifications?: AtsSpecifications | null;
   images?: ProductImage[];
 }
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const CATEGORIES: Category[] = ['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection'];
-const VISUALS: Record<Category, ProductVisual> = { Panels: 'panel', Inverters: 'inverter', Batteries: 'battery', Mounting: 'rail', Protection: 'combiner' };
+const CATEGORIES = PRODUCT_CATEGORIES;
+const VISUALS: Record<Category, ProductVisual> = { Panels: 'panel', Inverters: 'inverter', Batteries: 'battery', Mounting: 'rail', 'Circuit breakers': 'combiner', 'Surge Protection Device': 'combiner', ATS: 'combiner', 'PV Isolator': 'combiner', MCCB: 'combiner' };
 const FIELDS = ['id', 'schemaVersion', 'version', 'publishedAt', 'sku', 'name', 'brand', 'category', 'unitCode', 'description', 'amountMinor', 'currency'];
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const exact = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 const text = (v: unknown, max: number, multiline = false): v is string => typeof v === 'string' && !!v && v === v.trim() && v.length <= max
   && !(multiline ? /[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f]/ : /[\u0000-\u001f\u007f]/).test(v);
 export function parsePublishedProduct(v: unknown): PublishedProduct {
-  if (!record(v) || !exact(v, [...FIELDS, ...(Object.hasOwn(v, 'panelSpecifications') ? ['panelSpecifications'] : []), ...(Object.hasOwn(v, 'images') ? ['images'] : [])])
+  if (!record(v) || !exact(v, [...FIELDS, ...(Object.hasOwn(v, 'panelSpecifications') ? ['panelSpecifications'] : []), ...(Object.hasOwn(v, 'protectionType') ? ['protectionType'] : []), ...(Object.hasOwn(v, 'mcbSpecifications') ? ['mcbSpecifications'] : []), ...(Object.hasOwn(v, 'atsSpecifications') ? ['atsSpecifications'] : []), ...(Object.hasOwn(v, 'images') ? ['images'] : [])])
     || Object.hasOwn(v, 'panelSpecifications') && (!validPanelSpecifications(v['panelSpecifications'], true) || v['panelSpecifications'] !== null && v['category'] !== 'Panels')
+    || !validProtectionFields(v, true)
     || Object.hasOwn(v, 'images') && !validProductImages(v['images'])
     || typeof v['id'] !== 'string' || !UUID.test(v['id'])
     || v['schemaVersion'] !== 1 || !Number.isSafeInteger(v['version']) || (v['version'] as number) < 1 || (v['version'] as number) >= Number.MAX_SAFE_INTEGER
@@ -28,20 +34,25 @@ export function parsePublishedProduct(v: unknown): PublishedProduct {
     || !Number.isFinite(Date.parse(v['publishedAt'])) || new Date(v['publishedAt']).toISOString() !== v['publishedAt']
     || !text(v['sku'], 64) || !/^[A-Z0-9][A-Z0-9._-]{0,63}$/.test(v['sku'])
     || !text(v['name'], 160) || !text(v['brand'], 80) || !text(v['description'], 4000, true)
-    || !CATEGORIES.includes(v['category'] as Category) || !['unit', 'panel', 'kit'].includes(v['unitCode'] as string)
+    || !(v['category'] === null || CATEGORIES.includes(v['category'] as Category)) || !['unit', 'panel', 'kit'].includes(v['unitCode'] as string)
     || v['currency'] !== 'PHP' || !Number.isSafeInteger(v['amountMinor']) || (v['amountMinor'] as number) < 0 || (v['amountMinor'] as number) > 99_999_999_999_999) {
     throw new Error('Public catalog returned an invalid record.');
   }
   return v as unknown as PublishedProduct;
 }
 export function publishedView(product: PublishedProduct): Product {
+  const mcb = product.mcbSpecifications;
+  const ats = product.atsSpecifications;
   return { id: product.id, sku: product.sku, name: product.name, brand: product.brand, category: product.category,
-    description: product.description, spec: product.panelSpecifications?.ratedMaximumPower || 'Specifications not configured',
-    secondarySpec: product.panelSpecifications?.dimensions || 'Illustrative category artwork',
+    description: product.description, spec: mcb ? `${mcb.amperage} A · ${mcb.type}` : ats ? `${ats.amperage} A` : product.protectionType === 'ATS' ? 'Amperage not specified' : product.panelSpecifications?.ratedMaximumPower || 'Specifications not configured',
+    secondarySpec: mcb ? 'Miniature circuit breaker' : product.protectionType === 'ATS' ? 'ATS' : product.panelSpecifications?.dimensions || 'Illustrative category artwork',
     ...(Object.hasOwn(product, 'panelSpecifications') ? { panelSpecifications: product.panelSpecifications } : {}),
+    ...(Object.hasOwn(product, 'protectionType') ? { protectionType: product.protectionType } : {}),
+    ...(Object.hasOwn(product, 'mcbSpecifications') ? { mcbSpecifications: product.mcbSpecifications } : {}),
+    ...(Object.hasOwn(product, 'atsSpecifications') ? { atsSpecifications: product.atsSpecifications } : {}),
     ...(Object.hasOwn(product, 'images') ? { images: product.images } : {}),
     price: product.amountMinor / 100, amountMinor: product.amountMinor, publishedVersion: product.version, source: 'published',
-    stock: 0, unit: product.unitCode, depot: '', supplierId: '', visual: VISUALS[product.category], tiers: [] };
+    stock: 0, unit: product.unitCode, depot: '', supplierId: '', visual: product.category ? VISUALS[product.category] : 'combiner', tiers: [] };
 }
 
 /** Anonymous, on-demand, bounded public reads. Never reads private masters or falls back to fixtures. */
@@ -74,6 +85,18 @@ export class PublicCatalogService {
     await this.hydrate(this.references);
   }
   async loadMore(): Promise<void> { if (!this.loading() && this.nextCursor()) await this.page(this.nextCursor()); }
+  /** Independent bounded picker page; does not replace storefront/BOM reference caches. */
+  async categoryPage(category: Category, cursor: string | null = null, protectionType?: 'ATS'): Promise<{ items: readonly Product[]; nextCursor: string | null }> {
+    if (!CATEGORIES.includes(category) || protectionType !== undefined && (protectionType !== 'ATS' || category !== 'ATS') || cursor !== null && !/^[A-Za-z0-9_-]{1,512}$/.test(cursor)) throw new Error('Invalid component selection.');
+    const query = new URLSearchParams({ category, limit: '10', ...(cursor ? { cursor } : {}) });
+    const value = await this.request('/api/v1/catalog/products?' + query);
+    if (!record(value) || !exact(value, ['items', 'nextCursor']) || !Array.isArray(value['items']) || value['items'].length > 10
+      || !(value['nextCursor'] === null || typeof value['nextCursor'] === 'string' && /^[A-Za-z0-9_-]{1,512}$/.test(value['nextCursor']))) throw new Error('Invalid component page.');
+    const items = value['items'].map(item => publishedView(parsePublishedProduct(item)));
+    if (items.some((item, index) => item.category !== category || protectionType !== undefined && item.protectionType !== protectionType || index > 0 && item.id <= items[index - 1].id)
+      || value['nextCursor'] !== null && items.length !== 10) throw new Error('Invalid component page.');
+    return { items, nextCursor: value['nextCursor'] as string | null };
+  }
   async hydrate(ids: readonly string[], recheck = false): Promise<void> {
     // Prioritize the current page/BOM rather than letting earlier accounts' public
     // references permanently consume the bounded cache. No private data is cached.

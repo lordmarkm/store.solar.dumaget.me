@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "purpose": "documentation-inventory-not-executable-registry",
+  "updatedOn": "2026-10-11",
+  "rules": [
+    {
+      "id": "shared-battery-voltage",
+      "version": 1,
+      "status": "implemented",
+      "document": "shared-battery-voltage.md",
+      "implementationPaths": ["backend/src/builder/rules.ts"],
+      "testPaths": ["backend/test/builder-rules.test.ts", "backend/test/builder-rule-documentation.test.ts"]
+    }
+  ]
+}

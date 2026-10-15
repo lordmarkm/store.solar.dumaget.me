@@ -45,7 +45,7 @@ export function adaptProductList(products: readonly Product[]): readonly AdminPr
   return products.map(product => {
     const amountMinor = Math.round(product.price * 100);
     return {
-      product, fixture: product, previewDraft: null, supplierId: product.supplierId || null,
+      product: { ...product, category: product.category ?? 'Uncategorized' }, fixture: product, previewDraft: null, supplierId: product.supplierId || null,
       publicationState: 'not-configured', updatedAt: null,
       price: Number.isFinite(product.price) && product.price >= 0 && Number.isSafeInteger(amountMinor)
         ? { currency: 'PHP', amountMinor } : null,

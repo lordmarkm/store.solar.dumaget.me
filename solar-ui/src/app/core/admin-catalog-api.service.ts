@@ -3,8 +3,10 @@ import type { AdminPage, AdminProduct, AdminSupplier, ProductCreateInput, Produc
 import { StoreApiError, StoreApiService } from './store-api.service';
 import { normalizePanelSpecifications, validPanelSpecifications } from './panel-specifications';
 import { validProductImages, type ProductImage } from './product-images';
-import type { ProductListFilters, SupplierUpdateInput, SupplierStatusInput } from './admin-catalog.models';
-export type { ProductListFilters, SupplierUpdateInput, SupplierStatusInput } from './admin-catalog.models';
+import { supplierProductUrlError } from './supplier-product-url';
+import { validProtectionFields, type McbSpecifications, type AtsSpecifications, type ProtectionType } from './mcb-specifications';
+import type { ProductListFilters, SupplierListFilters, SupplierUpdateInput, SupplierStatusInput } from './admin-catalog.models';
+export type { ProductListFilters, SupplierListFilters, SupplierUpdateInput, SupplierStatusInput } from './admin-catalog.models';
 
 export type { AdminPage, AdminProduct, AdminSupplier, ProductCreateInput, ProductUpdateInput, ProductPublicationInput, SupplierCreateInput } from './admin-catalog.models';
 
@@ -24,7 +26,7 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 }
 
 function productKeys(value: Record<string, unknown>, keys: readonly string[]): string[] {
-  return [...keys, ...(Object.hasOwn(value, 'panelSpecifications') ? ['panelSpecifications'] : []), ...(Object.hasOwn(value, 'images') ? ['images'] : [])];
+  return [...keys, ...(Object.hasOwn(value, 'supplierUrl') ? ['supplierUrl'] : []), ...(Object.hasOwn(value, 'protectionType') ? ['protectionType'] : []), ...(Object.hasOwn(value, 'mcbSpecifications') ? ['mcbSpecifications'] : []), ...(Object.hasOwn(value, 'atsSpecifications') ? ['atsSpecifications'] : []), ...(Object.hasOwn(value, 'panelSpecifications') ? ['panelSpecifications'] : []), ...(Object.hasOwn(value, 'images') ? ['images'] : [])];
 }
 function validProductSpecifications(value: Record<string, unknown>, canonical = false): boolean {
   return !Object.hasOwn(value, 'panelSpecifications') || validPanelSpecifications(value['panelSpecifications'], canonical)
@@ -76,17 +78,18 @@ function validSupplier(value: unknown): value is AdminSupplier {
     && value['createdAt'] <= value['updatedAt'];
 }
 
-function validProduct(value: unknown): value is AdminProduct {
+export function validProduct(value: unknown): value is AdminProduct {
   if (!record(value) || !exactKeys(value, productKeys(value, Object.hasOwn(value, 'publishedVersion')
-    ? [...PRODUCT_RECORD_FIELDS, 'publishedVersion'] : PRODUCT_RECORD_FIELDS)) || !validProductSpecifications(value, true)) return false;
+    ? [...PRODUCT_RECORD_FIELDS, 'publishedVersion'] : PRODUCT_RECORD_FIELDS)) || !validProductSpecifications(value, true) || !validProtectionFields(value, true)) return false;
   return typeof value['id'] === 'string' && UUID_V4.test(value['id']) && value['id'] === value['id'].toLowerCase()
     && canonicalText(value['sku'], 64, true) && /^[A-Z0-9][A-Z0-9._-]{0,63}$/.test(value['sku'] as string)
     && canonicalText(value['name'], 160, true) && canonicalText(value['brand'], 80)
-    && (value['category'] === null || ['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection'].includes(value['category'] as string))
+    && (value['category'] === null || ['Panels', 'Inverters', 'Batteries', 'Mounting', 'Circuit breakers', 'Surge Protection Device', 'ATS', 'PV Isolator', 'MCCB'].includes(value['category'] as string))
     && (value['unitCode'] === null || ['unit', 'panel', 'kit'].includes(value['unitCode'] as string))
     && canonicalText(value['description'], 4000, false, true)
     && (value['amountMinor'] === null || Number.isSafeInteger(value['amountMinor']) && (value['amountMinor'] as number) >= 0 && (value['amountMinor'] as number) <= MAX_AMOUNT_MINOR)
     && typeof value['supplierId'] === 'string' && UUID_V4.test(value['supplierId']) && value['supplierId'] === value['supplierId'].toLowerCase()
+    && (!Object.hasOwn(value, 'supplierUrl') || typeof value['supplierUrl'] === 'string' && value['supplierUrl'].trim() === value['supplierUrl'] && supplierProductUrlError(value['supplierUrl']) === null)
     && value['schemaVersion'] === 1 && validVersion(value['version'])
     && (value['state'] === 'draft' && !Object.hasOwn(value, 'publishedVersion')
       || value['state'] === 'published' && validVersion(value['publishedVersion']) && value['publishedVersion'] <= value['version'])
@@ -108,10 +111,17 @@ export class AdminCatalogApiService {
 
   uploadProductImage(file: Blob): Promise<ProductImage> { return this.api.uploadProductImage(file); }
 
-  listSuppliers(cursor: string | null = null): Promise<AdminPage<AdminSupplier>> {
-    if (!this.validCursor(cursor)) return Promise.reject(new StoreApiError('invalid-input'));
+  listSuppliers(cursor: string | null = null, filters: SupplierListFilters = {}): Promise<AdminPage<AdminSupplier>> {
+    if (!record(filters) || Object.keys(filters).some(key => !['namePrefix', 'status'].includes(key))
+      || filters['namePrefix'] !== undefined && (!canonicalText(filters['namePrefix'], 160, true) || /[\uD800-\uDFFF]/u.test(filters['namePrefix']))
+      || filters['status'] !== undefined && (typeof filters['status'] !== 'string' || !['active', 'inactive'].includes(filters['status']))) return Promise.reject(new StoreApiError('invalid-input'));
+    const filtered = Object.keys(filters).length > 0;
+    if (!(filtered ? cursor === null || typeof cursor === 'string' && /^[A-Za-z0-9_-]{1,2048}$/.test(cursor) : this.validCursor(cursor)))
+      return Promise.reject(new StoreApiError('invalid-input'));
+    const query: Record<string, string> = {};
+    for (const [key, value] of Object.entries(filters)) query[key] = value as string;
     return this.api.adminRequest('/api/v1/admin/suppliers', 'GET', undefined,
-      value => this.parsePage(value, validSupplier), cursor);
+      value => this.parsePage(value, validSupplier, filtered ? 'supplier' : 'uuid'), cursor, query);
   }
 
   createSupplier(input: SupplierCreateInput): Promise<{ supplier: AdminSupplier }> {
@@ -128,7 +138,7 @@ export class AdminCatalogApiService {
       || !record(filters) || Object.keys(filters).some(key => !['skuPrefix', 'brand', 'category', 'supplierId'].includes(key))
       || Object.entries(filters).some(([key, value]) => !canonicalText(value, key === 'skuPrefix' ? 64 : 80, true))
       || filters['skuPrefix'] !== undefined && (typeof filters['skuPrefix'] !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(filters['skuPrefix']))
-      || filters['category'] !== undefined && (typeof filters['category'] !== 'string' || !['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection'].includes(filters['category']))
+      || filters['category'] !== undefined && (typeof filters['category'] !== 'string' || !['Panels', 'Inverters', 'Batteries', 'Mounting', 'Circuit breakers', 'Surge Protection Device', 'ATS', 'PV Isolator', 'MCCB'].includes(filters['category']))
       || filters['supplierId'] !== undefined && !this.validId(filters['supplierId'])) return Promise.reject(new StoreApiError('invalid-input'));
     const query: Record<string, string> = {};
     for (const [key, value] of Object.entries(filters)) query[key] = key === 'skuPrefix' ? (value as string).toUpperCase() : value as string;
@@ -219,10 +229,10 @@ export class AdminCatalogApiService {
     return cursor === null || typeof cursor === 'string' && UUID_V4.test(cursor);
   }
 
-  private parsePage<T>(value: unknown, parseItem: (item: unknown) => item is T, cursorType: 'uuid' | 'opaque' | 'brand' = 'uuid'): AdminPage<T> {
+  private parsePage<T>(value: unknown, parseItem: (item: unknown) => item is T, cursorType: 'uuid' | 'opaque' | 'brand' | 'supplier' = 'uuid'): AdminPage<T> {
     if (!record(value) || !exactKeys(value, ['items', 'nextCursor']) || !Array.isArray(value['items'])
       || value['items'].length > 50 || !(value['nextCursor'] === null || typeof value['nextCursor'] === 'string'
-        && (cursorType === 'opaque' ? /^[A-Za-z0-9_-]{1,512}$/.test(value['nextCursor']) : cursorType === 'brand'
+        && (cursorType === 'supplier' ? /^[A-Za-z0-9_-]{1,2048}$/.test(value['nextCursor']) : cursorType === 'opaque' ? /^[A-Za-z0-9_-]{1,512}$/.test(value['nextCursor']) : cursorType === 'brand'
           ? canonicalText(value['nextCursor'], 80, true) : UUID_V4.test(value['nextCursor']) && value['nextCursor'] === value['nextCursor'].toLowerCase()))) return invalidResponse();
     if (!value['items'].every(parseItem)) return invalidResponse();
     return { items: value['items'], nextCursor: value['nextCursor'] } as AdminPage<T>;
@@ -238,17 +248,22 @@ export class AdminCatalogApiService {
   }
 
   private validProductInput(value: unknown): ProductCreateInput | null {
-    if (!record(value) || !exactKeys(value, productKeys(value, PRODUCT_FIELDS)) || !validProductSpecifications(value)
+    if (!record(value) || !exactKeys(value, productKeys(value, PRODUCT_FIELDS)) || !validProductSpecifications(value) || !validProtectionFields(value)
       || Object.hasOwn(value, 'images') && !validProductImages(value['images'])
       || typeof value['requestId'] !== 'string' || !UUID_V4.test(value['requestId'])
       || !cleanText(value['sku'], 64, 1) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value['sku'].trim())
       || !cleanText(value['name'], 160, 1) || !value['name'].trim()
-      || !cleanText(value['brand'], 80) || !(value['category'] === null || ['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection'].includes(value['category'] as string))
+      || !cleanText(value['brand'], 80) || !(value['category'] === null || ['Panels', 'Inverters', 'Batteries', 'Mounting', 'Circuit breakers', 'Surge Protection Device', 'ATS', 'PV Isolator', 'MCCB'].includes(value['category'] as string))
       || !(value['unitCode'] === null || ['unit', 'panel', 'kit'].includes(value['unitCode'] as string))
       || !cleanText(value['description'], 4000, 0, true)
       || !(value['amountMinor'] === null || Number.isSafeInteger(value['amountMinor']) && (value['amountMinor'] as number) >= 0 && (value['amountMinor'] as number) <= MAX_AMOUNT_MINOR)
       || typeof value['supplierId'] !== 'string' || !UUID_V4.test(value['supplierId'])) return null;
+    if (Object.hasOwn(value, 'supplierUrl') && (typeof value['supplierUrl'] !== 'string' || supplierProductUrlError(value['supplierUrl']) !== null)) return null;
     return { requestId: value['requestId'].toLowerCase(), sku: value['sku'].trim().toUpperCase(), name: value['name'].trim(), brand: value['brand'].trim(), category: value['category'] as ProductCreateInput['category'], unitCode: value['unitCode'] as ProductCreateInput['unitCode'], description: value['description'].trim(), amountMinor: value['amountMinor'] as number | null, supplierId: value['supplierId'].toLowerCase(),
+      ...(Object.hasOwn(value, 'supplierUrl') ? { supplierUrl: (value['supplierUrl'] as string).trim() } : {}),
+      ...(Object.hasOwn(value, 'protectionType') ? { protectionType: value['protectionType'] as ProtectionType | null } : {}),
+      ...(Object.hasOwn(value, 'mcbSpecifications') ? { mcbSpecifications: value['mcbSpecifications'] as McbSpecifications | null } : {}),
+      ...(Object.hasOwn(value, 'atsSpecifications') ? { atsSpecifications: value['atsSpecifications'] as AtsSpecifications | null } : {}),
       ...(Object.hasOwn(value, 'panelSpecifications') ? { panelSpecifications: value['panelSpecifications'] === null ? null : normalizePanelSpecifications(value['panelSpecifications'] as NonNullable<ProductCreateInput['panelSpecifications']>) } : {}),
       ...(Object.hasOwn(value, 'images') ? { images: [...value['images'] as ProductImage[]] } : {}) };
   }

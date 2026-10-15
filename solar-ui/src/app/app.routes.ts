@@ -33,7 +33,7 @@ export const routes: Routes = [
       { path: 'admin/products/new', title: 'New product · Dumaget.me Solar', canDeactivate: [leaveAdminEditorGuard], loadComponent: () => import('./features/admin-catalog/admin-product-create').then(m => m.AdminProductCreatePage) },
       { path: 'admin/products/:id/edit', title: 'Edit product · Dumaget.me Solar', canDeactivate: [leaveAdminEditorGuard], loadComponent: () => import('./features/admin-catalog/admin-product-editor').then(m => m.AdminProductEditorPage) },
       { path: 'admin/products', title: 'Products · Dumaget.me Solar', loadComponent: () => import('./features/admin-catalog/admin-products').then(m => m.AdminProductsPage) },
-      { path: 'admin/inventory', title: 'Inventory · Dumaget.me Solar', loadComponent: () => import('./features/inventory/inventory').then(m => m.Inventory) },
+      { path: 'admin/inventory', title: 'Inventory · Dumaget.me Solar', canDeactivate: [leaveAdminEditorGuard], loadComponent: () => import('./features/inventory/inventory').then(m => m.Inventory) },
       { path: 'admin/suppliers/new', title: 'New supplier · Dumaget.me Solar', canDeactivate: [leaveAdminEditorGuard], loadComponent: () => import('./features/admin-catalog/admin-supplier-create').then(m => m.AdminSupplierCreatePage) },
       { path: 'admin/suppliers/:id/edit', title: 'Edit supplier · Dumaget.me Solar', canDeactivate: [leaveAdminEditorGuard], loadComponent: () => import('./features/admin-catalog/admin-supplier-editor').then(m => m.AdminSupplierEditorPage) },
       { path: 'admin/suppliers', title: 'Suppliers · Dumaget.me Solar', loadComponent: () => import('./features/admin-catalog/admin-suppliers').then(m => m.AdminSuppliersPage) },

@@ -1,7 +1,8 @@
 import { Category, Product, Supplier } from './models';
+import { PRODUCT_CATEGORIES } from './product-categories';
 
 // Illustrative fixtures adapted from Stitch, not verified offers or warehouse stock.
-export const CATEGORIES: readonly Category[] = ['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection'];
+export const CATEGORIES: readonly Category[] = PRODUCT_CATEGORIES;
 export const SUPPLIERS: readonly Supplier[] = [
   { id: 'osda', name: 'OSDA Solar', region: 'Ningbo, China', category: 'PV panels', leadDays: 18, orderUnit: '620 panels / container', initials: 'OS' },
   { id: 'srne', name: 'SRNE Solar', region: 'Shenzhen, China', category: 'Inverters & energy storage', leadDays: 21, orderUnit: '10 inverters / order', initials: 'SR' },
@@ -15,5 +16,5 @@ export const PRODUCTS: readonly Product[] = [
   { id: 'srne-314', sku: 'SRN-LFP-48314', name: '15.1kWh LiFePO4 Battery Bank', brand: 'SRNE', category: 'Batteries', description: 'High-capacity storage with integrated BMS and CAN/RS485 connectivity.', spec: '15.1 kWh', secondarySpec: '314 Ah', price: 148000, stock: 6, unit: 'unit', depot: 'Bagacay', supplierId: 'srne', visual: 'battery', tiers: [{ quantity: 2, unitPrice: 139500, label: 'Dual bank · 2+' }] },
   { id: 'anern-100', sku: 'AN-LFP24100C', name: '2.56kWh Modular LiFePO4 Battery', brand: 'Anern', category: 'Batteries', description: 'Compact 24V battery module for smaller residential backup systems.', spec: '2.56 kWh', secondarySpec: '24V · 100 Ah', price: 23800, stock: 32, unit: 'unit', depot: 'Taclobo', supplierId: 'anern', visual: 'battery', tiers: [{ quantity: 8, unitPrice: 21900, label: 'Bulk · 8+' }] },
   { id: 'rail-6', sku: 'ARX-6P-CORR', name: '6-Panel Corrugated Roof Rail Kit', brand: 'AlumRax', category: 'Mounting', description: 'Aluminum rails, roof feet, and clamps for a six-module installation.', spec: '6-panel row', secondarySpec: 'SUS304 hardware', price: 4150, stock: 64, unit: 'kit', depot: 'Bagacay', supplierId: 'alumrax', visual: 'rail', tiers: [{ quantity: 10, unitPrice: 3700, label: 'Bundle · 10+' }] },
-  { id: 'combiner-2', sku: 'STR-DCB-2IN2', name: '2-String DC Combiner Box', brand: 'Suntree', category: 'Protection', description: 'Pre-wired enclosure with surge protection and DC isolation.', spec: '1000V DC', secondarySpec: 'IP65 enclosure', price: 3850, stock: 2, unit: 'unit', depot: 'Bagacay', supplierId: 'suntree', visual: 'combiner', tiers: [{ quantity: 6, unitPrice: 3450, label: 'Carton · 6+' }] },
+  { id: 'combiner-2', sku: 'STR-DCB-2IN2', name: '2-String DC Combiner Box', brand: 'Suntree', category: null, description: 'Pre-wired enclosure with surge protection and DC isolation.', spec: '1000V DC', secondarySpec: 'IP65 enclosure', price: 3850, stock: 2, unit: 'unit', depot: 'Bagacay', supplierId: 'suntree', visual: 'combiner', tiers: [{ quantity: 6, unitPrice: 3450, label: 'Carton · 6+' }] },
 ];

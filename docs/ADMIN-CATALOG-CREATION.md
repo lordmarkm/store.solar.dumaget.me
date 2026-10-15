@@ -1,5 +1,10 @@
 # Admin supplier and product creation
 
+Sourcing update (2026-10-12): private draft creation supports supplierUrl and
+requires it for Shopee products, just like Save and Publish. Missing price and
+pictures remain honestly unset in drafts; do not guess them from listing URLs.
+See [the current sourcing contract](ADMIN-CATALOG-MANAGEMENT.md#supplier-product-urls-2026-10-12).
+
 Publication update (2026-10-07): canonical product editing, Publish/Unpublish and
 the anonymous published storefront catalog are now implemented. The draft-only
 contract below describes the creation slice; saves still never auto-publish.

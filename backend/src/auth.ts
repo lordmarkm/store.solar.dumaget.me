@@ -3,6 +3,7 @@ import { ApiError } from './errors.js';
 
 export interface VerifiedIdentity {
   readonly uid: string;
+  readonly displayName?: string;
   readonly email: string | null;
   readonly emailVerified: boolean;
   readonly storeAdmin: boolean;
@@ -11,6 +12,13 @@ export interface VerifiedIdentity {
 export interface IdentityVerifier {
   verify(token: string): Promise<VerifiedIdentity>;
   close(): Promise<void>;
+}
+
+/** Presentation only; never use a name for authorization or actor identity. */
+export function actorDisplayName(value: unknown, uid: string): string | undefined {
+  if (typeof value !== 'string' || value.length > 160 || /[\u0000-\u001f\u007f\ud800-\udfff]/u.test(value)) return undefined;
+  const name = value.trim();
+  return name && name !== uid ? name : undefined;
 }
 
 export function bearerToken(header: string | undefined): string {

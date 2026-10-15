@@ -8,10 +8,11 @@ import { PendingGuestList } from '../core/guest-lists';
 import { NewProjectWizard } from './new-project-wizard';
 import { CustomerAccessService } from '../core/customer-access.service';
 import { projectUiRequest, projectUiSession } from './project-ui-session';
+import { IntegerQuantity } from './integer-quantity';
 
 @Component({
   selector: 'app-add-to-project-dialog',
-  imports: [FormsModule, NewProjectWizard],
+  imports: [FormsModule, NewProjectWizard, IntegerQuantity],
   templateUrl: './add-to-project-dialog.html',
 })
 export class AddToProjectDialog {
@@ -25,7 +26,7 @@ export class AddToProjectDialog {
   get product() { return this.data.pending ? resolveProduct(this.data.pending.product, this.service.products()) : undefined; }
   readonly quantity = signal(this.data.pending?.quantity ?? 1);
   readonly guestRows = this.data.guest ? this.service.currentGuestList()?.items ?? [] : [];
-  guestTitle(id: string): string { const item = this.guestRows.find(i => i.id === id); return item ? resolveProduct(item.product, this.service.products())?.name ?? `Unavailable product · ${item.product.productId}` : ''; }
+  guestTitle(id: string): string { const item = this.guestRows.find(i => i.id === id); return item ? resolveProduct(item.product, this.service.products())?.name ?? 'Unavailable product' : ''; }
   readonly eligible = computed(() => this.access.canAccessProjects() ? this.service.projects().filter(project => project.status === 'draft' && project.customerId === this.access.customerId()) : []);
   readonly active = computed(() => this.access.canAccessProjects() && this.service.activeProject()?.customerId === this.access.customerId() ? this.service.activeProject() : null);
   readonly selectedId = signal('');

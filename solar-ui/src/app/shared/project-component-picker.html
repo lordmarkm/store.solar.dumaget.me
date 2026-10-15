@@ -1,0 +1,22 @@
+@if (freeText()) {
+  <ng-container [ngComponentOutlet]="lineEditor" [ngComponentOutletInjector]="editorInjector" />
+} @else {
+<section class="flex max-h-[calc(100dvh-32px)] min-w-0 flex-col bg-card text-card-foreground">
+  <header class="shrink-0 border-b border-border p-5"><h2 id="component-picker-title" class="text-lg font-semibold">{{ data.component.addLabel }}</h2></header>
+  <div class="min-h-0 min-w-0 overflow-y-auto p-5">
+    <button type="button" class="kt-btn kt-btn-light mb-5" [disabled]="saving()" (click)="addFreeText()"><i class="ki-outline ki-plus" aria-hidden="true"></i>Add free-text line</button>
+    @if (data.component.category) {
+    <label for="component-quantity" class="mb-2 block text-sm">Quantity<span class="solar-required-marker" aria-hidden="true">*</span></label><input id="component-quantity" aria-required="true" type="number" appIntegerQuantity class="kt-input mb-4 w-28" min="1" step="1" [disabled]="saving()" [ngModel]="quantity()" (ngModelChange)="quantity.set($event)" />
+    @if (loading()) { <p class="mb-4 text-sm" role="status">Loading equipment…</p> }
+    @if (error()) { <div class="mb-4"><p class="text-sm" role="alert">{{ error() }}</p><button class="kt-btn kt-btn-sm kt-btn-light mt-2" [disabled]="loading() || saving()" (click)="load(page())">Retry</button></div> }
+    <app-ktui-table [rows]="items()" [rowKey]="rowKey" label="Available components" [busy]="loading() || saving()" [emptyMessage]="loading() ? 'Loading equipment…' : error() ? 'Equipment could not be loaded.' : 'No published equipment in this category yet.'">
+      <ng-template solarTableColumn="product" [solarTableColumnOf]="items()" header="Product" width="60%" let-product><div class="flex min-w-0 items-start gap-3"><app-product-visual [kind]="product.visual" [images]="product.images" variant="thumb" [alt]="product.name + ' product image'" class="product-stage block h-14 w-14 shrink-0" /><div class="min-w-0"><p class="break-words font-semibold">{{ product.name }}</p><p class="mt-1 text-xs text-muted-foreground">{{ product.brand }} · {{ product.sku }}</p></div></div></ng-template>
+      <ng-template solarTableColumn="price" [solarTableColumnOf]="items()" header="Unit price" width="25%" let-product><span class="public-price">{{ product.price | currency:'PHP':'symbol':'1.2-2' }}</span><p class="mt-1 text-xs text-muted-foreground">/ {{ product.unit }}</p></ng-template>
+      <ng-template solarTableColumn="add" [solarTableColumnOf]="items()" header="Add" width="15%" let-product><app-tooltip label="Add to project"><button class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" [disabled]="saving() || loading()" [attr.aria-label]="'Add ' + product.name + ' to project'" [attr.title]="'Add ' + product.name + ' to project'" (click)="add(product)"><i class="ki-outline ki-plus" aria-hidden="true"></i></button></app-tooltip></ng-template>
+    </app-ktui-table>
+    <nav class="mt-4 flex flex-wrap items-center justify-between gap-3" aria-label="Component pages"><button class="kt-btn kt-btn-sm kt-btn-light" [disabled]="page() === 0 || loading() || saving()" (click)="load(page()-1)">Previous</button><span class="text-xs">Page {{ page()+1 }} · 10 per page</span><button class="kt-btn kt-btn-sm kt-btn-light" [disabled]="!nextCursor() || loading() || saving()" (click)="next()">Next</button></nav>
+    }
+  </div>
+  <footer class="flex shrink-0 justify-end border-t border-border p-5"><button class="kt-btn kt-btn-light" [disabled]="saving()" (click)="close()">Close</button></footer>
+</section>
+}

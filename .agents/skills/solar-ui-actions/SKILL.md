@@ -46,20 +46,26 @@ vendor repositories to style solar.
 
 ## Actions and layout
 
+- Mark actual required fields and BOM slots with the shared red
+  `.solar-required-marker` asterisk; optional fields/slots remain unmarked.
+  Do not use parenthetic required/optional labels. Preserve native/ARIA required
+  semantics and conditional validation, including draft versus publication rules.
+
 - Keep semantic colors, bordered cards, and spacing. Public pages use green/mint
   tokens and 2px angular geometry from the companion
   `.agents/skills/solar-customer-theme/SKILL.md`; administration retains blue and
   its established radii. Adapt structure to the requested workflow.
-- Use `kt-btn kt-btn-primary` for the principal task CTA, such as Add to Cart or
-  Save SKU. Do not make every navigation or row action primary.
+- Use at most one `kt-btn kt-btn-primary` per page for its principal task CTA;
+  zero is valid. Repeated row/card actions are secondary, and inventory has zero
+  primary buttons. This supersedes the older per-card Cart example.
 - Use `kt-btn kt-btn-light` for ordinary secondary actions, with shared size classes.
   This variant is app-owned, not supplied by installed KTUI. Adapt its definition
   once in the solar global stylesheet: pale neutral surface, readable text/icons,
   semantic-primary outline (green public, blue admin), hover/focus states, and distinct disabled styling. Do not
   redefine it per page.
 - Catalog product-card footer actions are icon-only: combine `kt-btn kt-btn-icon`
-  with the appropriate variant and move wording into the shared tooltip. Cart is
-  primary; Details and Add to project are secondary. Retain concise visible labels
+  with the secondary variant and move wording into the shared tooltip. Cart,
+  Details and Add to project are secondary. Retain concise visible labels
   on header, hero, filter, and page-level CTAs. Do not silently convert every
   supplier/admin card or unrelated action to icon-only.
 - Group related actions with explicit wrapping flex/grid spacing. Use `gap-3` (12px)
@@ -72,11 +78,14 @@ Current catalog mappings, verified in the solar outline stylesheet:
 
 | Action | Classes | Codepoint | Shared tooltip |
 | --- | --- | --- | --- |
-| Add to Cart / Cart navigation | `ki-outline ki-handcart` | `\ea37` | `Add to Cart` for the add action |
+| Add / New / Create, including Cart and project additions | `ki-outline ki-plus` | `\ea9e` | The actual Add action or disabled reason |
+| Cart navigation | `ki-outline ki-handcart` | `\ea37` | Cart destination |
 | View product details | `ki-outline ki-eye` | `\ea08` | `Details` |
-| Add to project | `ki-outline ki-clipboard` | `\e9a3` | `Add to project`, or the disabled reason |
+| Project navigation | `ki-outline ki-clipboard` | `\e9a3` | Project destination |
 
-Use a shopping-cart glyph for Cart, not the project clipboard. Customer-facing
+Use plus for additions, including Add another/more. Keep checks for Save/Confirm
+and selected/active states; bind the glyph to Add versus Save in shared editors.
+Navigation keeps its destination glyph rather than plus. Customer-facing
 guest equipment-list wording is **Cart** / **Add to Cart**. This naming does not
 rename project BOMs, legacy `/draft` or `/bom` routes, browser storage keys, or
 internal models, and does not introduce checkout or inventory reservations.

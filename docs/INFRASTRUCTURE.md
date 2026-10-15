@@ -1,5 +1,11 @@
 # Infrastructure and hosting decision
 
+Local update (2026-10-09): API /ready now uses bounded cached Firestore/Auth/image
+bucket read probes; see [connected readiness](CONNECTED-READINESS.md). Only one
+required supplier status/name index was added to existing store-dev, now READY,
+bringing the admin catalog indexes to eight. No database, region, edition,
+rules/IAM, hosting, paid monitoring or catalog/image data change was made.
+
 Image-storage update (2026-10-08): the user approved a US-region exception for
 product images. Dedicated Standard bucket dumaget-me-solar-store-images-dev
 was created in us-west1 with uniform access and soft delete off. After explicit

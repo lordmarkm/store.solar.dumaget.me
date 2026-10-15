@@ -9,9 +9,13 @@ export interface SupplierInput {
 }
 export interface ProductInput {
   requestId: string; sku: string; name: string; brand: string;
-  category: 'Panels' | 'Inverters' | 'Batteries' | 'Mounting' | 'Protection' | null;
+  category: 'Panels' | 'Inverters' | 'Batteries' | 'Mounting' | 'Circuit breakers' | 'Surge Protection Device' | 'ATS' | 'PV Isolator' | 'MCCB' | null;
   unitCode: 'unit' | 'panel' | 'kit' | null; description: string;
   amountMinor: number | null; supplierId: string;
+  supplierUrl?: string;
+  protectionType?: 'MCB' | 'ATS' | null;
+  mcbSpecifications?: McbSpecifications | null;
+  atsSpecifications?: AtsSpecifications | null;
   panelSpecifications?: PanelSpecifications | null;
   images?: ProductImage[];
 }
@@ -20,6 +24,8 @@ export const panelSpecificationKeys = ['productCode', 'eanCode', 'lightColor', '
   'safetyClass', 'maxSystemVoltage', 'grossWeight', 'netWeight', 'warranty'] as const;
 export type PanelSpecificationKey = typeof panelSpecificationKeys[number];
 export type PanelSpecifications = Partial<Record<PanelSpecificationKey, string>>;
+export interface McbSpecifications { type: 'AC' | 'DC'; amperage: number }
+export interface AtsSpecifications { amperage: number }
 interface RecordMetadata {
   id: string; schemaVersion: 1; version: number; createdBy: string;
   createdAt: string; updatedAt: string;
@@ -28,20 +34,27 @@ export interface AdminSupplier extends Omit<SupplierInput, 'requestId'>, RecordM
 export interface SupplierUpdateInput extends SupplierInput { expectedVersion: number }
 export interface SupplierStatusInput extends ProductCommand { status: 'active' | 'inactive' }
 export interface ProductListFilters { skuPrefix?: string; brand?: string; category?: string; supplierId?: string }
+export type PublicProductCategory = NonNullable<ProductInput['category']>;
+export interface PublishedProductListQuery { category?: PublicProductCategory; limit?: number }
+export interface SupplierListFilters { namePrefix?: string; status?: 'active' | 'inactive' }
 export interface AdminProduct extends Omit<ProductInput, 'requestId'>, RecordMetadata { state: 'draft' | 'published'; currency: 'PHP'; publishedVersion?: number }
 export interface ProductCommand { requestId: string; expectedVersion: number }
 export interface ProductUpdateInput extends ProductInput { expectedVersion: number }
 export interface PublishedProduct {
   id: string; schemaVersion: 1; version: number; publishedAt: string;
-  sku: string; name: string; brand: string; category: NonNullable<ProductInput['category']>;
+  sku: string; name: string; brand: string; category: PublicProductCategory | null;
   unitCode: NonNullable<ProductInput['unitCode']>; description: string; amountMinor: number; currency: 'PHP';
+  protectionType?: 'MCB' | 'ATS' | null;
+  mcbSpecifications?: McbSpecifications | null;
+  atsSpecifications?: AtsSpecifications | null;
   panelSpecifications?: PanelSpecifications | null;
   images?: ProductImage[];
 }
 export interface AdminPage<T> { items: T[]; nextCursor: string | null }
+export const productCategories = ['Panels', 'Inverters', 'Batteries', 'Mounting', 'Circuit breakers', 'Surge Protection Device', 'ATS', 'PV Isolator', 'MCCB'] as const;
 export interface AdminCatalogRepository {
-  suppliers(cursor: string | null): Promise<AdminPage<AdminSupplier>>;
-  products(cursor: string | null, filters?: ProductListFilters): Promise<AdminPage<AdminProduct>>;
+  suppliers(cursor: string | null, filters?: SupplierListFilters): Promise<AdminPage<AdminSupplier>>;
+  products(cursor: string | null, filters?: ProductListFilters, pageSize?: 10 | 50): Promise<AdminPage<AdminProduct>>;
   productBrands(cursor: string | null): Promise<AdminPage<string>>;
   supplier(id: string): Promise<AdminSupplier>;
   updateSupplier(identity: VerifiedIdentity, id: string, input: SupplierUpdateInput): Promise<AdminSupplier>;
@@ -52,7 +65,7 @@ export interface AdminCatalogRepository {
   updateProduct(identity: VerifiedIdentity, id: string, input: ProductUpdateInput): Promise<AdminProduct>;
   publishProduct(identity: VerifiedIdentity, id: string, input: ProductCommand): Promise<AdminProduct>;
   unpublishProduct(identity: VerifiedIdentity, id: string, input: ProductCommand): Promise<AdminProduct>;
-  publishedProducts(cursor: string | null): Promise<AdminPage<PublishedProduct>>;
+  publishedProducts(cursor: string | null, query?: PublishedProductListQuery): Promise<AdminPage<PublishedProduct>>;
   publishedProduct(id: string): Promise<PublishedProduct>;
   publishedReferences(ids: readonly string[]): Promise<PublishedProduct[]>;
 }
@@ -77,8 +90,56 @@ function text(value: unknown, max: number, required = false, multiline = false):
 const supplierFields = ['requestId', 'name', 'region', 'description', 'website', 'email', 'phone'] as const;
 const productFields = ['requestId', 'sku', 'name', 'brand', 'category', 'unitCode', 'description', 'amountMinor', 'supplierId'] as const;
 const metadataFields = ['id', 'schemaVersion', 'version', 'createdBy', 'createdAt', 'updatedAt'];
-function optionalProductKeys(value: Record<string, unknown>): string[] {
-  return ['panelSpecifications', 'images'].filter(key => Object.hasOwn(value, key));
+function optionalProductKeys(value: Record<string, unknown>, privateFields = true): string[] {
+  return ['panelSpecifications', 'images', 'protectionType', 'mcbSpecifications', 'atsSpecifications', ...(privateFields ? ['supplierUrl'] : [])].filter(key => Object.hasOwn(value, key));
+}
+
+/** Electrical ratings are explicit administrator input, never inferred from names/images. */
+export function parseMcbSpecifications(value: unknown): McbSpecifications {
+  if (!object(value) || !exact(value, ['type', 'amperage']) || (value['type'] !== 'AC' && value['type'] !== 'DC')
+    || typeof value['amperage'] !== 'number' || !Number.isFinite(value['amperage'])
+    || value['amperage'] <= 0 || value['amperage'] > Number.MAX_SAFE_INTEGER) invalid();
+  return { type: value['type'], amperage: value['amperage'] };
+}
+
+export function parseAtsSpecifications(value: unknown): AtsSpecifications {
+  if (!object(value) || !exact(value, ['amperage']) || typeof value['amperage'] !== 'number'
+    || !Number.isFinite(value['amperage']) || value['amperage'] <= 0 || value['amperage'] > Number.MAX_SAFE_INTEGER) invalid();
+  return { amperage: value['amperage'] };
+}
+
+export function requireMcbSpecifications(product: Pick<ProductInput, 'category' | 'protectionType' | 'mcbSpecifications' | 'atsSpecifications'>, allowLegacyAts = false): void {
+  if (product.category === 'Circuit breakers' && product.protectionType !== 'MCB') invalid();
+  if (product.category === 'ATS' && product.protectionType !== 'ATS') invalid();
+  if (product.protectionType != null && ((!['MCB', 'ATS'].includes(product.protectionType))
+    || (product.protectionType === 'MCB' ? product.category !== 'Circuit breakers' : product.category !== 'ATS'))) invalid();
+  if (product.protectionType === 'MCB') parseMcbSpecifications(product.mcbSpecifications);
+  else if (product.mcbSpecifications != null) invalid();
+  if (product.protectionType === 'ATS') {
+    if (!(allowLegacyAts && product.atsSpecifications == null)) parseAtsSpecifications(product.atsSpecifications);
+  } else if (product.atsSpecifications != null) invalid();
+}
+
+/** Private sourcing metadata. Preserve query/variant selection; never fetch this URL. */
+export function parseSupplierProductUrl(value: unknown): string {
+  const result = text(value, 2048);
+  if (typeof value !== 'string' || /[\p{Cc}\uD800-\uDFFF]/u.test(value) || /[\s\\]/u.test(result)) invalid();
+  if (!result) return result;
+  try {
+    const url = new URL(result);
+    if (!/^https:\/\//i.test(result) || url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.port) invalid();
+  } catch { invalid(); }
+  return result;
+}
+
+/** Run alongside the authoritative supplier read in create/save/publish transactions. */
+export function requireSupplierProductUrl(product: Pick<ProductInput, 'supplierUrl'>, supplier: Pick<AdminSupplier, 'name'>): void {
+  if (supplier.name.trim().toLowerCase() !== 'shopee') return;
+  const link = product.supplierUrl ? parseSupplierProductUrl(product.supplierUrl) : '';
+  const host = link ? new URL(link).hostname.toLowerCase() : '';
+  if (!link || (host !== 'shopee.ph' && !host.endsWith('.shopee.ph'))) {
+    throw new ApiError(400, 'SUPPLIER_URL_REQUIRED', 'Shopee products require a Shopee product URL.');
+  }
 }
 
 export function parseSupplierInput(value: unknown): SupplierInput {
@@ -98,14 +159,14 @@ export function parseSupplierInput(value: unknown): SupplierInput {
     website, email, phone: text(value['phone'], 80),
   };
 }
-export function parseProductInput(value: unknown): ProductInput {
+export function parseProductInput(value: unknown, allowLegacyAts = false): ProductInput {
   if (!object(value) || !exact(value, [...productFields, ...optionalProductKeys(value)])
     || !uuid(value['requestId']) || !uuid(value['supplierId'])) invalid();
   const sku = text(value['sku'], 64, true).toUpperCase();
   if (!/^[A-Z0-9][A-Z0-9._-]{0,63}$/.test(sku)) invalid();
   const category = value['category'];
   const unitCode = value['unitCode'];
-  if (category !== null && (typeof category !== 'string' || !['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection'].includes(category))) invalid();
+  if (category !== null && (typeof category !== 'string' || !productCategories.includes(category as typeof productCategories[number]))) invalid();
   if (unitCode !== null && (typeof unitCode !== 'string' || !['unit', 'panel', 'kit'].includes(unitCode))) invalid();
   // Never convert fractional pesos or trust a browser-provided currency/tax value.
   const amountMinor = value['amountMinor'];
@@ -125,6 +186,19 @@ export function parseProductInput(value: unknown): ProductInput {
     }
   }
   if (Object.hasOwn(value, 'images')) result.images = parseProductImages(value['images']);
+  if (Object.hasOwn(value, 'supplierUrl')) result.supplierUrl = parseSupplierProductUrl(value['supplierUrl']);
+  // The new category itself is the discriminator for new catalog writes.
+  if (category === 'Circuit breakers' && value['protectionType'] === undefined) result.protectionType = 'MCB';
+  if (category === 'ATS' && value['protectionType'] === undefined) result.protectionType = 'ATS';
+  if (Object.hasOwn(value, 'protectionType')) {
+    if (value['protectionType'] !== null && value['protectionType'] !== 'MCB' && value['protectionType'] !== 'ATS') invalid();
+    result.protectionType = value['protectionType'];
+  }
+  if (Object.hasOwn(value, 'mcbSpecifications')) result.mcbSpecifications = value['mcbSpecifications'] === null
+    ? null : parseMcbSpecifications(value['mcbSpecifications']);
+  if (Object.hasOwn(value, 'atsSpecifications')) result.atsSpecifications = value['atsSpecifications'] === null
+    ? null : parseAtsSpecifications(value['atsSpecifications']);
+  requireMcbSpecifications(result, allowLegacyAts);
   return result;
 }
 export function parsePanelSpecifications(value: unknown): PanelSpecifications {
@@ -142,6 +216,27 @@ export function parseCursor(value: unknown): string | null {
   if (!uuid(value['cursor'])) invalid();
   return value['cursor'].toLowerCase();
 }
+export function parsePublishedProductQuery(value: unknown): { cursor: string | null; filters: PublishedProductListQuery } {
+  if (!object(value) || Object.keys(value).some(key => !['cursor', 'category', 'limit'].includes(key))) invalid();
+  const filters: PublishedProductListQuery = {};
+  if (value['category'] !== undefined) {
+    if (typeof value['category'] !== 'string' || !productCategories.includes(value['category'] as typeof productCategories[number])) invalid();
+    filters.category = value['category'] as PublicProductCategory;
+  }
+  if (value['limit'] !== undefined) {
+    const limit = typeof value['limit'] === 'string' && /^\d{1,2}$/.test(value['limit']) ? Number(value['limit']) : value['limit'];
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 50) invalid();
+    filters.limit = limit;
+  }
+  const cursor = value['cursor'] ?? null;
+  if (!filters.category && (filters.limit ?? 50) === 50) {
+    if (cursor === null) return { cursor: null, filters };
+    if (!uuid(cursor)) invalid();
+    return { cursor: cursor.toLowerCase(), filters };
+  }
+  if (cursor !== null && (typeof cursor !== 'string' || !/^[A-Za-z0-9_-]{1,512}$/.test(cursor))) invalid();
+  return { cursor: cursor as string | null, filters };
+}
 export function parseProductQuery(value: unknown): { cursor: string | null; filters: ProductListFilters } {
   if (!object(value) || Object.keys(value).some(key => !['cursor', 'skuPrefix', 'brand', 'category', 'supplierId'].includes(key))) invalid();
   const filters: ProductListFilters = {};
@@ -153,13 +248,40 @@ export function parseProductQuery(value: unknown): { cursor: string | null; filt
   if (value['brand'] !== undefined) filters.brand = text(value['brand'], 80, true);
   if (value['category'] !== undefined) {
     const category = text(value['category'], 32, true);
-    if (!['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection'].includes(category)) invalid();
+    if (!productCategories.includes(category as typeof productCategories[number])) invalid();
     filters.category = category;
   }
   if (value['supplierId'] !== undefined) filters.supplierId = parseProductId(value['supplierId']);
   const cursor = value['cursor'] ?? null;
   if (cursor !== null && (typeof cursor !== 'string' || !/^[A-Za-z0-9_-]{1,512}$/.test(cursor))) invalid();
   return { cursor: cursor as string | null, filters };
+}
+export function parseSupplierQuery(value: unknown): { cursor: string | null; filters: SupplierListFilters } {
+  if (!object(value) || Object.keys(value).some(key => !['cursor', 'namePrefix', 'status'].includes(key))) invalid();
+  const filters: SupplierListFilters = {};
+  if (value['namePrefix'] !== undefined) {
+    const prefix = text(value['namePrefix'], 160, true);
+    if (/[\uD800-\uDFFF]/u.test(prefix)) invalid();
+    filters.namePrefix = prefix;
+  }
+  if (value['status'] !== undefined) {
+    if (value['status'] !== 'active' && value['status'] !== 'inactive') invalid();
+    filters.status = value['status'];
+  }
+  const cursor = value['cursor'] ?? null;
+  if (Object.keys(filters).length === 0) return { cursor: parseCursor(value), filters };
+  if (cursor !== null && (typeof cursor !== 'string' || !/^[A-Za-z0-9_-]{1,2048}$/.test(cursor))) invalid();
+  return { cursor: cursor as string | null, filters };
+}
+/** Exclusive UTF-8/Unicode scalar prefix bound; unlike U+F8FF, includes emoji. */
+export function supplierPrefixEnd(prefix: string): string | null {
+  const scalars = Array.from(prefix);
+  for (let index = scalars.length - 1; index >= 0; index--) {
+    const code = scalars[index]!.codePointAt(0)!;
+    if (code === 0x10ffff) continue;
+    return scalars.slice(0, index).join('') + String.fromCodePoint(code === 0xd7ff ? 0xe000 : code + 1);
+  }
+  return null;
 }
 export function parseBrandCursor(value: unknown): string | null {
   if (!object(value) || Object.keys(value).some(key => key !== 'cursor')) invalid();
@@ -203,13 +325,22 @@ export function parseProductRecord(value: unknown, id: string): AdminProduct {
     if (!exact(value, allowed)
       || !validMetadata(value, id) || !['draft', 'published'].includes(value['state'] as string) || value['currency'] !== 'PHP'
       || (value['state'] === 'published' && (!validVersion(value['publishedVersion']) || value['publishedVersion'] > (value['version'] as number)))) invalid();
+    const legacyCategory = value['category'] === 'Protection';
+    const normalizedCategory = legacyCategory
+      ? value['protectionType'] === 'MCB' ? 'Circuit breakers' : value['protectionType'] === 'ATS' ? 'ATS' : null
+      : value['category'];
     const parsed = parseProductInput({ requestId: id, sku: value['sku'], name: value['name'], brand: value['brand'],
-      category: value['category'], unitCode: value['unitCode'], description: value['description'],
+      category: normalizedCategory, unitCode: value['unitCode'], description: value['description'],
       amountMinor: value['amountMinor'], supplierId: value['supplierId'],
+      ...(Object.hasOwn(value, 'protectionType') ? { protectionType: value['protectionType'] } : {}),
+      ...(Object.hasOwn(value, 'mcbSpecifications') ? { mcbSpecifications: value['mcbSpecifications'] } : {}),
+      ...(Object.hasOwn(value, 'atsSpecifications') ? { atsSpecifications: value['atsSpecifications'] } : {}),
+      ...(Object.hasOwn(value, 'supplierUrl') ? { supplierUrl: value['supplierUrl'] } : {}),
       ...(Object.hasOwn(value, 'panelSpecifications') ? { panelSpecifications: value['panelSpecifications'] } : {}),
-      ...(Object.hasOwn(value, 'images') ? { images: value['images'] } : {}) });
+      ...(Object.hasOwn(value, 'images') ? { images: value['images'] } : {}) }, true);
     const { requestId: _requestId, ...input } = parsed;
-    for (const key of Object.keys(input)) if (key !== 'panelSpecifications' && key !== 'images' && input[key as keyof typeof input] !== value[key]) invalid();
+    for (const key of Object.keys(input)) if (key !== 'panelSpecifications' && key !== 'images' && key !== 'mcbSpecifications' && key !== 'atsSpecifications'
+      && !(legacyCategory && key === 'category') && input[key as keyof typeof input] !== value[key]) invalid();
     if (Object.hasOwn(value, 'panelSpecifications')) {
       if (parsed.panelSpecifications === null ? value['panelSpecifications'] !== null : !object(value['panelSpecifications'])) invalid();
       if (parsed.panelSpecifications && object(value['panelSpecifications'])) {
@@ -218,7 +349,11 @@ export function parseProductRecord(value: unknown, id: string): AdminProduct {
           || Object.keys(parsed.panelSpecifications).some(key => parsed.panelSpecifications?.[key as PanelSpecificationKey] !== storedSpecs[key])) invalid();
       }
     }
-    return { ...value, ...(Object.hasOwn(value, 'panelSpecifications') ? { panelSpecifications: parsed.panelSpecifications } : {}),
+    return { ...value, category: normalizedCategory,
+      ...(Object.hasOwn(value, 'protectionType') || parsed.protectionType ? { protectionType: parsed.protectionType } : {}),
+      ...(Object.hasOwn(value, 'mcbSpecifications') ? { mcbSpecifications: parsed.mcbSpecifications } : {}),
+      ...(Object.hasOwn(value, 'atsSpecifications') ? { atsSpecifications: parsed.atsSpecifications } : {}),
+      ...(Object.hasOwn(value, 'panelSpecifications') ? { panelSpecifications: parsed.panelSpecifications } : {}),
       ...(Object.hasOwn(value, 'images') ? { images: parsed.images } : {}) } as unknown as AdminProduct;
   } catch { throw new ApiError(503, 'CATALOG_DATA_INVALID', 'Stored catalog data needs review.'); }
 }
@@ -252,25 +387,37 @@ export function publicationBlockers(product: Pick<AdminProduct, 'brand' | 'categ
     requireImages && !product.images?.length ? 'product image' : ''].filter(Boolean);
 }
 export function publicProjection(product: AdminProduct, at: string): PublishedProduct {
+  requireMcbSpecifications(product);
   const blockers = publicationBlockers(product);
   if (blockers.length) throw new ApiError(422, 'PRODUCT_NOT_READY', `Complete ${blockers.join(', ')} before publishing.`);
   return { id: product.id, schemaVersion: 1, version: product.version, publishedAt: at, sku: product.sku, name: product.name,
     brand: product.brand, category: product.category!, unitCode: product.unitCode!, description: product.description,
     amountMinor: product.amountMinor!, currency: 'PHP', ...(Object.hasOwn(product, 'panelSpecifications') ? { panelSpecifications: product.panelSpecifications } : {}),
+    ...(Object.hasOwn(product, 'protectionType') ? { protectionType: product.protectionType } : {}),
+    ...(Object.hasOwn(product, 'mcbSpecifications') ? { mcbSpecifications: product.mcbSpecifications } : {}),
+    ...(Object.hasOwn(product, 'atsSpecifications') ? { atsSpecifications: product.atsSpecifications } : {}),
     ...(Object.hasOwn(product, 'images') ? { images: product.images } : {}) };
 }
 export function parsePublishedProduct(value: unknown, id: string): PublishedProduct {
   try {
     const publishedFields = ['id', 'schemaVersion', 'version', 'publishedAt', 'sku', 'name', 'brand', 'category', 'unitCode', 'description', 'amountMinor', 'currency'];
-    if (!object(value) || !exact(value, [...publishedFields, ...optionalProductKeys(value)])
+    if (!object(value) || !exact(value, [...publishedFields, ...optionalProductKeys(value, false)])
       || value['id'] !== id || id !== id.toLowerCase() || !uuid(id) || value['schemaVersion'] !== 1 || !validVersion(value['version']) || !iso(value['publishedAt']) || value['currency'] !== 'PHP') invalid();
-    const parsed = parseProductInput({ requestId: id, supplierId: id, sku: value['sku'], name: value['name'], brand: value['brand'], category: value['category'],
+    const legacyCategory = value['category'] === 'Protection';
+    const normalizedCategory = legacyCategory
+      ? value['protectionType'] === 'MCB' ? 'Circuit breakers' : value['protectionType'] === 'ATS' ? 'ATS' : null
+      : value['category'];
+    const parsed = parseProductInput({ requestId: id, supplierId: id, sku: value['sku'], name: value['name'], brand: value['brand'], category: normalizedCategory,
       unitCode: value['unitCode'], description: value['description'], amountMinor: value['amountMinor'],
+      ...(Object.hasOwn(value, 'protectionType') ? { protectionType: value['protectionType'] } : {}),
+      ...(Object.hasOwn(value, 'mcbSpecifications') ? { mcbSpecifications: value['mcbSpecifications'] } : {}),
+      ...(Object.hasOwn(value, 'atsSpecifications') ? { atsSpecifications: value['atsSpecifications'] } : {}),
       ...(Object.hasOwn(value, 'panelSpecifications') ? { panelSpecifications: value['panelSpecifications'] } : {}),
-      ...(Object.hasOwn(value, 'images') ? { images: value['images'] } : {}) });
+      ...(Object.hasOwn(value, 'images') ? { images: value['images'] } : {}) }, true);
     // Read historical projections honestly; require pictures only on the next publish/republish.
-    if (publicationBlockers(parsed, false).length) invalid();
-    for (const key of ['sku', 'name', 'brand', 'category', 'unitCode', 'description', 'amountMinor'] as const) if (parsed[key] !== value[key]) invalid();
+    if (publicationBlockers(parsed, false).some(blocker => !(legacyCategory && blocker === 'category'))) invalid();
+    for (const key of ['sku', 'name', 'brand', 'category', 'unitCode', 'description', 'amountMinor'] as const)
+      if (!(legacyCategory && key === 'category') && parsed[key] !== value[key]) invalid();
     if (Object.hasOwn(value, 'panelSpecifications')) {
       if (parsed.panelSpecifications === null ? value['panelSpecifications'] !== null : !object(value['panelSpecifications'])) invalid();
       if (parsed.panelSpecifications && object(value['panelSpecifications'])) {
@@ -279,7 +426,11 @@ export function parsePublishedProduct(value: unknown, id: string): PublishedProd
           || Object.keys(parsed.panelSpecifications).some(key => parsed.panelSpecifications?.[key as PanelSpecificationKey] !== storedSpecs[key])) invalid();
       }
     }
-    return { ...value, ...(Object.hasOwn(value, 'panelSpecifications') ? { panelSpecifications: parsed.panelSpecifications } : {}),
+    return { ...value, category: normalizedCategory,
+      ...(Object.hasOwn(value, 'protectionType') || parsed.protectionType ? { protectionType: parsed.protectionType } : {}),
+      ...(Object.hasOwn(value, 'mcbSpecifications') ? { mcbSpecifications: parsed.mcbSpecifications } : {}),
+      ...(Object.hasOwn(value, 'atsSpecifications') ? { atsSpecifications: parsed.atsSpecifications } : {}),
+      ...(Object.hasOwn(value, 'panelSpecifications') ? { panelSpecifications: parsed.panelSpecifications } : {}),
       ...(Object.hasOwn(value, 'images') ? { images: parsed.images } : {}) } as unknown as PublishedProduct;
   } catch { throw new ApiError(503, 'CATALOG_DATA_INVALID', 'Stored public catalog data needs review.'); }
 }

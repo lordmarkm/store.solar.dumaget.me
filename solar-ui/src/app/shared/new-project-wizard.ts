@@ -28,8 +28,8 @@ export class NewProjectWizard {
   readonly pending = this.data?.pending;
   readonly guest = this.data?.guest;
   readonly guestRows = this.guest ? this.projects.currentGuestList()?.items ?? [] : [];
-  guestTitle(id: string): string { const item = this.guestRows.find(i => i.id === id); return item ? resolveProduct(item.product, this.projects.products())?.name ?? `Unavailable product · ${item.product.productId}` : ''; }
-  get pendingTitle(): string { return this.pending ? resolveProduct(this.pending.product, this.projects.products())?.name ?? this.pending.product.productId : ''; }
+  guestTitle(id: string): string { const item = this.guestRows.find(i => i.id === id); return item ? resolveProduct(item.product, this.projects.products())?.name ?? 'Unavailable product' : ''; }
+  get pendingTitle(): string { return this.pending ? resolveProduct(this.pending.product, this.projects.products())?.name ?? 'Unavailable product' : ''; }
   readonly draft = signal<NewProjectDraft>(createNewProjectDraft());
   readonly step = signal(0);
   readonly attempted = signal(false);

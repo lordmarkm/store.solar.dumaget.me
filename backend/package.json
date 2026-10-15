@@ -11,7 +11,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "check": "tsc -p tsconfig.check.json --noEmit",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:builder": "node --import tsx --test test/builder-rules.test.ts test/builder-rule-documentation.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",

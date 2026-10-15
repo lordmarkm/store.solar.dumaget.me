@@ -42,6 +42,13 @@ describe('product image uploader', () => {
   });
   afterEach(() => TestBed.resetTestingModule());
 
+  it('shows upload controls without unsolicited storage-policy notices', () => {
+    expect(fixture.nativeElement.querySelector('[role="note"]')).toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain('Public image notice');
+    expect(fixture.nativeElement.querySelector('input[type="file"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.product-image-paste-zone')).not.toBeNull();
+  });
+
   it('uploads a pasted image from the dedicated zone and preserves ordinary text paste', async () => {
     const emitted = vi.fn();
     fixture.componentInstance.imagesChange.subscribe(emitted);

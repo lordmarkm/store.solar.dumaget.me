@@ -139,7 +139,7 @@ describe('admin product API filters', () => {
 
   it('uses static categories and paginates brand options independently of product results', async () => {
     await open();
-    expect(page.categories).toEqual(['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection']);
+    expect(page.categories).toEqual(['Panels', 'Inverters', 'Batteries', 'Mounting', 'Circuit breakers', 'Surge Protection Device', 'ATS', 'PV Isolator', 'MCCB']);
     expect(page.brands()).toEqual(['Sun Co']);
     expect(page.supplierName(inactiveSupplier.id)).toBe('Archived Solar');
     const supplierOptions = [...(fixture.nativeElement.querySelector('#admin-product-supplier') as HTMLSelectElement).options].map(option => option.textContent?.trim());

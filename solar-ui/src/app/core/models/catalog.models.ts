@@ -67,6 +67,8 @@ export interface CatalogProductDetails {
   readonly name: string;
   readonly brand: DisplayReference;
   readonly category: DisplayReference;
+  readonly protectionType?: 'MCB' | 'ATS' | null;
+  readonly atsSpecifications?: { readonly amperage: number } | null;
   readonly description: string;
   readonly specifications: readonly ProductSpecification[];
   readonly unitLabel: string;

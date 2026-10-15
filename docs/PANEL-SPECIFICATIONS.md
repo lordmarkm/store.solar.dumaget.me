@@ -70,6 +70,10 @@ proxied public catalog requests and API health still return 200. The broader
 frontend suite has 266 passing tests and 9 failures in project/auth flows; this
 slice does not claim those unrelated workflows are fully verified.
 
+Subsequent 2026-10-09 management verification resolves those failures: the
+complete frontend suite now passes 328 tests / 46 files, with 75 backend tests
+and both builds passing. The preceding counts are historical slice results.
+
 Focused tests cover validation, EAN/units, legacy compatibility, create/edit forms,
 public DTO/view and dialog rendering. An explicit local Firestore emulator test
 checks persistence/reload, idempotency, private edits versus republishing and

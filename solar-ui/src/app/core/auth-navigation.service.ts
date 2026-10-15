@@ -3,13 +3,14 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationStart, Router } from '@angular/router';
 import { AdminAccessService } from './admin-access.service';
 import { AuthSessionService } from './auth-session.service';
+import { safeCustomerReturnUrl } from './customer-return-url';
 
 interface LoginRequest {
   id: number; baseline: number; completed: boolean;
-  uid: string | null; revision: number | null;
+  uid: string | null; revision: number | null; returnUrl: string;
 }
 
-/** A user-initiated popup, followed by server-confirmed admin navigation only. */
+/** A user-initiated popup, followed by navigation for the server-confirmed account. */
 @Injectable({ providedIn: 'root' })
 export class AuthNavigationService {
   private readonly auth = inject(AuthSessionService);
@@ -57,6 +58,11 @@ export class AuthNavigationService {
         void this.router.navigateByUrl('/admin').catch(() => false);
       } else if (this.admin.status() === 'forbidden' || this.admin.status() === 'unavailable') {
         this.request.set(null);
+        // An API error is not proof of a non-admin account.
+        const identity = this.admin.identity();
+        if (identity?.uid === request.uid && identity.adminAuthorized === false) {
+          void this.router.navigateByUrl(request.returnUrl).catch(() => false);
+        }
       }
     });
   }
@@ -64,7 +70,8 @@ export class AuthNavigationService {
   async signInGoogle(): Promise<void> {
     if (this.disposed || this.request() || this.auth.busy() || this.auth.status() !== 'signed-out') return;
     const id = ++this.sequence;
-    this.request.set({ id, baseline: this.auth.sessionRevision(), completed: false, uid: null, revision: null });
+    const returnUrl = safeCustomerReturnUrl(this.router.parseUrl(this.router.url).queryParamMap.get('returnUrl'));
+    this.request.set({ id, baseline: this.auth.sessionRevision(), completed: false, uid: null, revision: null, returnUrl });
     // No lazy import, dialog, timer or awaited preparation before the popup call.
     await this.auth.signInGoogle();
     const request = this.request();

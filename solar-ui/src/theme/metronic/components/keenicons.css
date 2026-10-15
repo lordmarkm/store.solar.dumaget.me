@@ -44,6 +44,21 @@
   content: '\e9e5';
 }
 
+/* Metronic 9.2 outline/style.css; verified against the matching bundled WOFF. */
+.ki-cube-2.ki-outline::before {
+  content: '\e9b8';
+}
+
+/* Metronic 9.2 outline/style.css; verified against the matching bundled WOFF. */
+.ki-dots-horizontal.ki-outline::before {
+  content: '\e9d9';
+}
+
+/* Metronic 9.2 outline/style.css; verified against the matching bundled WOFF. */
+.ki-setting-2.ki-outline::before {
+  content: '\eabe';
+}
+
 .ki-up.ki-outline::before {
   content: '\eb19';
 }
@@ -104,6 +119,11 @@
 
 .ki-pencil.ki-outline::before {
   content: '\ea94';
+}
+
+/* Metronic 9.2 outline/style.css; verified against the matching bundled WOFF. */
+.ki-plus.ki-outline::before {
+  content: '\ea9e';
 }
 
 .ki-screen.ki-outline::before {

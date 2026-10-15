@@ -25,9 +25,9 @@ export interface SaveCustomerProfileInput {
 }
 
 export type AdminApiPath = '/api/v1/admin/suppliers' | '/api/v1/admin/products' | '/api/v1/admin/product-brands'
-  | `/api/v1/admin/products/${string}` | `/api/v1/admin/suppliers/${string}`;
+  | `/api/v1/admin/products/${string}` | `/api/v1/admin/suppliers/${string}` | `/api/v1/admin/inventory/${string}`;
 export type ProjectApiPath = '/api/v1/me/projects' | '/api/v1/me/project-active'
-  | `/api/v1/me/projects/${string}` | `/api/v1/me/projects/${string}/commands`;
+  | `/api/v1/me/projects/${string}` | `/api/v1/me/projects/${string}/commands` | `/api/v1/me/projects/${string}/management`;
 
 export type StoreApiErrorCode = 'unauthorized' | 'forbidden' | 'not-found' | 'conflict' | 'rate-limited'
   | 'unavailable' | 'timeout' | 'invalid-response' | 'session-changed' | 'invalid-input';
@@ -143,15 +143,33 @@ export class StoreApiService {
     const supplierPath = /^\/api\/v1\/admin\/suppliers\/[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(path);
     const supplierAction = /^\/api\/v1\/admin\/suppliers\/[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\/status$/.test(path);
     const brands = path === '/api/v1/admin/product-brands';
+    const uuidPath = '[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}';
+    const inventoryList = new RegExp('^/api/v1/admin/inventory/' + uuidPath + '$').test(path);
+    const locationList = path === '/api/v1/admin/inventory/locations';
+    const locationEdit = new RegExp('^/api/v1/admin/inventory/locations/' + uuidPath + '$').test(path);
+    const inventoryProduct = new RegExp('^/api/v1/admin/inventory/' + uuidPath + '/products/' + uuidPath + '$').test(path);
+    const movements = new RegExp('^/api/v1/admin/inventory/' + uuidPath + '/products/' + uuidPath + '/movements$').test(path);
+    const adjustment = new RegExp('^/api/v1/admin/inventory/' + uuidPath + '/products/' + uuidPath + '/adjustments$').test(path);
+    const count = new RegExp('^/api/v1/admin/inventory/' + uuidPath + '/products/' + uuidPath + '/counts$').test(path);
+    const transfer = new RegExp('^/api/v1/admin/inventory/' + uuidPath + '/products/' + uuidPath + '/transfers$').test(path);
+    const settings = new RegExp('^/api/v1/admin/inventory/' + uuidPath + '/products/' + uuidPath + '/settings$').test(path);
+    const supplierFilters = path === '/api/v1/admin/suppliers' && Object.keys(filters).length > 0;
     const validCursor = cursor === null || typeof cursor === 'string' && (brands ? cursor.length > 0 && cursor.length <= 80 && !/[\u0000-\u001f\u007f]/.test(cursor)
-      : path === '/api/v1/admin/products' ? /^[A-Za-z0-9_-]{1,512}$/.test(cursor)
+      : supplierFilters ? /^[A-Za-z0-9_-]{1,2048}$/.test(cursor) : inventoryList || movements || path === '/api/v1/admin/products' ? /^[A-Za-z0-9_-]{1,512}$/.test(cursor)
       : /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(cursor));
     if (!(listPath && ['GET', 'POST'].includes(method) || (productPath || supplierPath) && ['GET', 'PUT'].includes(method)
-      || (actionPath || supplierAction) && method === 'POST' || brands && method === 'GET')
-      || !validCursor || cursor !== null && (method !== 'GET' || !listPath && !brands)
-      || Object.keys(filters).length > 0 && (path !== '/api/v1/admin/products' || method !== 'GET')
-      || Object.entries(filters).some(([key, value]) => !['skuPrefix', 'brand', 'category', 'supplierId'].includes(key)
-        || typeof value !== 'string' || !value || value.length > 80 || /[\u0000-\u001f\u007f]/.test(value))) {
+      || (actionPath || supplierAction || adjustment || count || transfer) && method === 'POST'
+      || (brands || inventoryList || inventoryProduct || movements) && method === 'GET'
+      || settings && method === 'PUT'
+      || locationList && ['GET', 'POST'].includes(method) || locationEdit && method === 'PUT')
+      || !validCursor || cursor !== null && (method !== 'GET' || !listPath && !brands && !inventoryList && !movements && !locationList)
+      || Object.keys(filters).length > 0 && (!listPath && !inventoryList || method !== 'GET')
+      || Object.entries(filters).some(([key, value]) => !(supplierFilters ? ['namePrefix', 'status']
+        : ['skuPrefix', 'brand', 'category', 'supplierId', ...(inventoryList ? ['stockStatus'] : [])]).includes(key)
+        || typeof value !== 'string' || !value || value.trim() !== value || value.length > (supplierFilters && key === 'namePrefix' ? 160 : 80)
+        || /[\u0000-\u001f\u007f\uD800-\uDFFF]/u.test(value)
+        || supplierFilters && key === 'status' && !['active', 'inactive'].includes(value)
+        || key === 'stockStatus' && (!inventoryList || !['unknown', 'zero', 'low', 'in-stock'].includes(value)))) {
       return Promise.reject(new StoreApiError('invalid-input'));
     }
     let serialized: string | undefined;
@@ -165,23 +183,29 @@ export class StoreApiService {
 
   /** Fixed account project endpoints only; never accepts caller-selected arbitrary API paths. */
   projectRequest<T>(path: ProjectApiPath, method: 'GET' | 'POST' | 'PUT', body: unknown,
-    parse: (value: unknown, customerId: string) => T, cursor: string | null = null): Promise<T> {
+    parse: (value: unknown, customerId: string) => T, cursor: string | null = null, filters: Readonly<Record<string, string>> = {}): Promise<T> {
     const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}';
     const list = path === '/api/v1/me/projects';
     const active = path === '/api/v1/me/project-active';
     const detail = new RegExp(`^/api/v1/me/projects/${uuid}$`, 'i').test(path);
     const command = new RegExp(`^/api/v1/me/projects/${uuid}/commands$`, 'i').test(path);
-    if (!(list && method === 'GET' || detail && method === 'GET' || command && method === 'POST'
+    const management = new RegExp(`^/api/v1/me/projects/${uuid}/management$`, 'i').test(path);
+    if (!(list && method === 'GET' || detail && method === 'GET' || (command || management) && method === 'POST'
       || path === '/api/v1/me/projects' && method === 'POST' || active && method === 'PUT')
       || (cursor !== null && (!list || method !== 'GET' || !new RegExp(`^${uuid}$`, 'i').test(cursor)))) {
       return Promise.reject(new StoreApiError('invalid-input'));
     }
+    if (Object.keys(filters).some(key => !['search', 'status', 'classification', 'configuration', 'workScope', 'limit'].includes(key))
+      || Object.keys(filters).length && (!list || method !== 'GET')
+      || Object.values(filters).some(value => typeof value !== 'string' || value.length > 120 || /[\u0000-\u001f\u007f]/.test(value))) return Promise.reject(new StoreApiError('invalid-input'));
     let serialized: string | undefined;
     try {
       serialized = method === 'GET' ? undefined : JSON.stringify(body);
       if (method !== 'GET' && (serialized === undefined || new TextEncoder().encode(serialized).byteLength > 65_536)) throw new Error('body-size');
     } catch { return Promise.reject(new StoreApiError('invalid-input')); }
-    const requestPath: ProjectApiPath | `${ProjectApiPath}?cursor=${string}` = cursor ? `${path}?cursor=${encodeURIComponent(cursor)}` : path;
+    const query = new URLSearchParams(filters);
+    if (cursor) query.set('cursor', cursor);
+    const requestPath: ProjectApiPath | `${ProjectApiPath}?${string}` = query.size ? `${path}?${query}` : path;
     return this.request(requestPath, method, serialized, parse);
   }
 
@@ -215,7 +239,7 @@ export class StoreApiService {
   }
 
   private async request<T>(
-    path: '/api/v1/me' | '/api/v1/me/profile' | '/api/v1/admin/product-images' | AdminApiPath | `${AdminApiPath}?${string}` | ProjectApiPath | `${ProjectApiPath}?cursor=${string}`,
+    path: '/api/v1/me' | '/api/v1/me/profile' | '/api/v1/admin/product-images' | AdminApiPath | `${AdminApiPath}?${string}` | ProjectApiPath | `${ProjectApiPath}?${string}`,
     method: 'GET' | 'PUT' | 'POST',
     body: string | Blob | undefined,
     parse: (value: unknown, customerId: string) => T,

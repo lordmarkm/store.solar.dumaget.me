@@ -15,10 +15,11 @@ import { Project } from '../../core/models';
 import { CustomerAccessService } from '../../core/customer-access.service';
 import { Router } from '@angular/router';
 import { projectUiSession } from '../../shared/project-ui-session';
+import { IntegerQuantity } from '../../shared/integer-quantity';
 
 @Component({
   selector: 'app-bom',
-  imports: [CurrencyPipe, FormsModule, RouterLink, Tooltip, ProductVisualComponent],
+  imports: [CurrencyPipe, FormsModule, RouterLink, Tooltip, ProductVisualComponent, IntegerQuantity],
   templateUrl: './bom.html',
 })
 export class Bom {

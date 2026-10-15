@@ -14,17 +14,18 @@ function deferred<T>() {
   return { promise, resolve };
 }
 const input = { title: 'Roof work', description: '', unit: 'lot', quantity: 1, notes: '' };
+type ProjectFixture = { id: string; customerId: string; status: 'draft' };
 
 describe('account project dialogs await writes and fence stale owners', () => {
   let owner: ReturnType<typeof signal<string>>;
   let ref: { close: ReturnType<typeof vi.fn>; disableClose: boolean };
-  let service: { saveFreeText: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; accountBacked: ReturnType<typeof signal<boolean>> };
+  let service: { saveFreeText: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; accountBacked: ReturnType<typeof signal<boolean>>; projects: ReturnType<typeof signal<ProjectFixture[]>> };
   beforeEach(() => {
     owner = signal('account-a:1');
     ref = { close: vi.fn(), disableClose: false };
-    service = { saveFreeText: vi.fn(), create: vi.fn(), accountBacked: signal(true) };
+    service = { saveFreeText: vi.fn(), create: vi.fn(), accountBacked: signal(true), projects: signal([{ id: 'project-id', customerId: 'customer-a', status: 'draft' }]) };
     TestBed.configureTestingModule({ providers: [
-      { provide: CustomerAccessService, useValue: { canAccessProjects: signal(true), projectSessionKey: owner } },
+      { provide: CustomerAccessService, useValue: { canAccessProjects: signal(true), projectSessionKey: owner, customerId: signal('customer-a') } },
       { provide: ProjectService, useValue: service },
       { provide: DialogRef, useValue: ref },
       { provide: DIALOG_DATA, useValue: { projectId: 'project-id' } },
@@ -58,6 +59,26 @@ describe('account project dialogs await writes and fence stale owners', () => {
     editor.update('notes', 'Changed');
     await editor.save();
     expect(service.saveFreeText.mock.calls[2][2]).not.toBe(first);
+  });
+
+  it('seeds ATS editor data, requires a decimal-capable amperage field, and submits the validated rating', async () => {
+    TestBed.overrideProvider(DIALOG_DATA, { useValue: { projectId: 'project-id', componentCategory: 'ATS', componentProtectionType: 'ATS', componentLabel: 'ATS' } });
+    service.saveFreeText.mockResolvedValue({ ok: true });
+    const fixture = TestBed.createComponent(BomLineEditor); fixture.detectChanges();
+    const editor = fixture.componentInstance;
+    expect(editor.draft()).toMatchObject({ componentCategory: 'ATS', componentProtectionType: 'ATS' });
+    expect((fixture.nativeElement as HTMLElement).querySelector('#bom-line-editor-title')?.textContent).toContain('ATS');
+    const field = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#bom-line-amperage');
+    expect(field).not.toBeNull();
+    expect(field?.getAttribute('step')).toBe('any');
+    expect(field?.hasAttribute('appIntegerQuantity')).toBe(false);
+    editor.draft.set({ ...input, componentCategory: 'ATS', componentProtectionType: 'ATS' });
+    await editor.save();
+    expect(service.saveFreeText).not.toHaveBeenCalled();
+    expect(editor.error('amperage')).toBeTruthy();
+    editor.update('amperage', 63.5);
+    await editor.save();
+    expect(service.saveFreeText.mock.calls.at(-1)?.[1]).toMatchObject({ componentProtectionType: 'ATS', amperage: 63.5 });
   });
 
   it('closes on a true-to-true UID switch and ignores the old successful write', async () => {

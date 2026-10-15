@@ -3,26 +3,70 @@ import { FieldPath } from 'firebase-admin/firestore';
 import type { Firestore, Query } from 'firebase-admin/firestore';
 import type { VerifiedIdentity } from './auth.js';
 import { ApiError } from './errors.js';
-import { exact, object, parseProductInput, parseProductRecord, parseSupplierInput, parseSupplierRecord, uuid, parseProductId, parseProductUpdate, parseProductCommand, parsePublishedProduct, publicProjection, validVersion, parseReferenceIds, parseProductQuery, parseSupplierUpdate, parseSupplierStatus } from './admin-catalog.js';
-import type { AdminCatalogRepository, AdminPage, AdminProduct, AdminSupplier, ProductInput, SupplierInput, ProductCommand, ProductUpdateInput, PublishedProduct, ProductListFilters, SupplierUpdateInput, SupplierStatusInput } from './admin-catalog.js';
+import { exact, object, parseProductInput, parseProductRecord, parseSupplierInput, parseSupplierRecord, uuid, parseProductId, parseProductUpdate, parseProductCommand, parsePublishedProduct, parsePublishedProductQuery, publicProjection, validVersion, parseReferenceIds, parseProductQuery, parseSupplierUpdate, parseSupplierStatus } from './admin-catalog.js';
+import type { AdminCatalogRepository, AdminPage, AdminProduct, AdminSupplier, ProductInput, SupplierInput, ProductCommand, ProductUpdateInput, PublishedProduct, ProductListFilters, SupplierUpdateInput, SupplierStatusInput, PublishedProductListQuery } from './admin-catalog.js';
 import type { ProductImageLifecycle } from './product-image-lifecycle.js';
+import { parseSupplierQuery, supplierPrefixEnd } from './admin-catalog.js';
+import { requireSupplierProductUrl } from './admin-catalog.js';
+import { requireMcbSpecifications } from './admin-catalog.js';
+import type { SupplierListFilters } from './admin-catalog.js';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+/** Stable catalog anchor for bounded server-side inventory joins, not a row offset. */
+export function productPageCursor(filters: ProductListFilters, pageSize: 10 | 50, product: Pick<AdminProduct, 'sku' | 'id'>): string {
+  return Buffer.from(JSON.stringify({ filter: hash(JSON.stringify(pageSize === 50 ? filters : { filters, pageSize })),
+    sku: product.sku, id: product.id })).toString('base64url');
+}
 const normalizedName = (name: string) => name.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 
 /** API-only private masters; atomic identity, idempotency and audit writes. */
 export class FirestoreAdminCatalogRepository implements AdminCatalogRepository {
   constructor(private readonly database: () => Firestore, private readonly now = () => new Date(), private readonly imageLifecycle?: ProductImageLifecycle) {}
 
-  suppliers(cursor: string | null): Promise<AdminPage<AdminSupplier>> {
-    return this.list('suppliers', cursor, parseSupplierRecord);
-  }
-  async products(cursor: string | null, rawFilters: ProductListFilters = {}): Promise<AdminPage<AdminProduct>> {
+  async suppliers(cursor: string | null, rawFilters: SupplierListFilters = {}): Promise<AdminPage<AdminSupplier>> {
     try {
-      const { filters } = parseProductQuery(rawFilters);
+      const { filters } = parseSupplierQuery(rawFilters);
+      if (!Object.keys(filters).length) return await this.list('suppliers', cursor, parseSupplierRecord);
       const fingerprint = hash(JSON.stringify(filters));
+      let query: Query = this.database().collection('suppliers');
+      if (filters.status) query = query.where('status', '==', filters.status);
+      if (filters.namePrefix) {
+        query = query.where('name', '>=', filters.namePrefix);
+        const end = supplierPrefixEnd(filters.namePrefix);
+        if (end) query = query.where('name', '<', end);
+      }
+      query = query.orderBy('name').orderBy(FieldPath.documentId());
+      if (cursor !== null) {
+        let data: unknown;
+        try {
+          if (!/^[A-Za-z0-9_-]{1,2048}$/.test(cursor)) throw new Error();
+          data = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+        } catch { throw new ApiError(400, 'INVALID_CURSOR', 'Invalid page cursor.'); }
+        if (!object(data) || !exact(data, ['filter', 'name', 'id']) || data['filter'] !== fingerprint || !uuid(data['id'])
+          || typeof data['name'] !== 'string' || !data['name'] || data['name'].length > 160
+          || data['name'].trim() !== data['name'] || /[\u0000-\u001f\u007f\uD800-\uDFFF]/u.test(data['name']))
+          throw new ApiError(400, 'INVALID_CURSOR', 'Cursor does not match these filters.');
+        query = query.startAfter(data['name'], data['id']);
+      }
+      const page = await query.limit(51).get();
+      const items = page.docs.slice(0, 50).map(doc => parseSupplierRecord(doc.data(), doc.id));
+      const last = items.at(-1);
+      return { items, nextCursor: page.docs.length > 50 && last
+        ? Buffer.from(JSON.stringify({ filter: fingerprint, name: last.name, id: last.id })).toString('base64url') : null };
+    } catch (error) { throw this.sanitize(error); }
+  }
+  async products(cursor: string | null, rawFilters: ProductListFilters = {}, pageSize: 10 | 50 = 50): Promise<AdminPage<AdminProduct>> {
+    try {
+      if (pageSize !== 10 && pageSize !== 50) throw new ApiError(400, 'INVALID_PAGE_SIZE', 'Invalid page size.');
+      const { filters } = parseProductQuery(rawFilters);
+      const fingerprint = hash(JSON.stringify(pageSize === 50 ? filters : { filters, pageSize }));
       let query: Query = this.database().collection('products');
-      for (const key of ['brand', 'category', 'supplierId'] as const) if (filters[key]) query = query.where(key, '==', filters[key]);
+      const legacyProtectionCategory = filters.category === 'Circuit breakers' || filters.category === 'ATS';
+      for (const key of ['brand', 'category', 'supplierId'] as const) {
+        if (key === 'category' && legacyProtectionCategory) continue;
+        if (filters[key]) query = query.where(key, '==', filters[key]);
+      }
+      if (legacyProtectionCategory) query = query.where('category', 'in', [filters.category!, 'Protection']);
       // Fixed SKU ordering supports a bounded prefix range without a paid search service.
       query = query.orderBy('sku').orderBy(FieldPath.documentId());
       if (filters.skuPrefix) query = query.where('sku', '>=', filters.skuPrefix).where('sku', '<', filters.skuPrefix + '\uf8ff');
@@ -34,10 +78,29 @@ export class FirestoreAdminCatalogRepository implements AdminCatalogRepository {
           || typeof data['sku'] !== 'string' || !/^[A-Z0-9][A-Z0-9._-]{0,63}$/.test(data['sku'])) throw new ApiError(400, 'INVALID_CURSOR', 'Cursor does not match these filters.');
         query = query.startAfter(data['sku'], data['id']);
       }
-      const page = await query.limit(51).get();
-      const items = page.docs.slice(0, 50).map(doc => parseProductRecord(doc.data(), doc.id));
+      const page = await query.limit(legacyProtectionCategory ? 50 : pageSize + 1).get();
+      if (legacyProtectionCategory) {
+        const items: AdminProduct[] = [];
+        let lastScanned: AdminProduct | undefined;
+        let stoppedAtMatchedLookahead = false;
+        for (const doc of page.docs) {
+          const candidate = parseProductRecord(doc.data(), doc.id);
+          if (candidate.category === filters.category) {
+            if (items.length === pageSize) {
+              stoppedAtMatchedLookahead = true;
+              break;
+            }
+            items.push(candidate);
+          }
+          lastScanned = candidate;
+        }
+        const hasMoreCandidates = page.docs.length === 50;
+        return { items, nextCursor: lastScanned && (stoppedAtMatchedLookahead || hasMoreCandidates)
+          ? productPageCursor(filters, pageSize, lastScanned) : null };
+      }
+      const items = page.docs.slice(0, pageSize).map(doc => parseProductRecord(doc.data(), doc.id));
       const last = items.at(-1);
-      return { items, nextCursor: page.docs.length > 50 && last ? Buffer.from(JSON.stringify({ filter: fingerprint, sku: last.sku, id: last.id })).toString('base64url') : null };
+      return { items, nextCursor: page.docs.length > pageSize && last ? productPageCursor(filters, pageSize, last) : null };
     } catch (error) { throw this.sanitize(error); }
   }
   async productBrands(cursor: string | null): Promise<AdminPage<string>> {
@@ -55,8 +118,40 @@ export class FirestoreAdminCatalogRepository implements AdminCatalogRepository {
       return { items: [...new Set(values)], nextCursor: page.docs.length > 50 ? values.at(-1)! : null };
     } catch (error) { throw this.sanitize(error); }
   }
-  publishedProducts(cursor: string | null): Promise<AdminPage<PublishedProduct>> {
-    return this.list('publishedProducts', cursor, parsePublishedProduct);
+  async publishedProducts(cursor: string | null, rawQuery: PublishedProductListQuery = {}): Promise<AdminPage<PublishedProduct>> {
+    try {
+      const { filters } = parsePublishedProductQuery({ ...rawQuery });
+      const limit = filters.limit ?? 50;
+      // Keep the established UUID cursor and ordering for existing unfiltered callers.
+      if (!filters.category && limit === 50) return await this.list('publishedProducts', cursor, parsePublishedProduct);
+      const category = filters.category ?? null;
+      const protectionType = category === 'ATS' ? 'ATS' : category === 'Circuit breakers' ? 'MCB' : null;
+      // Subtype equality includes typed legacy Protection records and current category writes.
+      const fingerprint = hash(JSON.stringify({ category, limit, ...(protectionType ? { protectionType } : {}) }));
+      let query: Query = this.database().collection('publishedProducts');
+      // Single-field equality keeps subtype filters bounded without new composite indexes.
+      if (protectionType) query = query.where('protectionType', '==', protectionType);
+      else if (category) query = query.where('category', '==', category);
+      query = query.orderBy(FieldPath.documentId());
+      if (cursor !== null) {
+        let data: unknown;
+        try {
+          if (!/^[A-Za-z0-9_-]{1,512}$/.test(cursor)) throw new Error();
+          data = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+        } catch { throw new ApiError(400, 'INVALID_CURSOR', 'Invalid page cursor.'); }
+        if (!object(data) || !exact(data, ['filter', 'id']) || data['filter'] !== fingerprint || !uuid(data['id']))
+          throw new ApiError(400, 'INVALID_CURSOR', 'Cursor does not match these filters.');
+        query = query.startAfter(data['id']);
+      }
+      const page = await query.limit(limit + 1).get();
+      const visible = page.docs.slice(0, limit);
+      const items = visible.map(doc => parsePublishedProduct(doc.data(), doc.id));
+      if (items.some(item => category && item.category !== category || protectionType && item.protectionType !== protectionType))
+        throw new ApiError(503, 'CATALOG_DATA_INVALID', 'Stored catalog needs review.');
+      return { items,
+        nextCursor: page.docs.length > limit && visible.length
+          ? Buffer.from(JSON.stringify({ filter: fingerprint, id: visible.at(-1)!.id })).toString('base64url') : null };
+    } catch (error) { throw this.sanitize(error); }
   }
   product(id: string): Promise<AdminProduct> { return this.get('products', id, parseProductRecord); }
   supplier(id: string): Promise<AdminSupplier> { return this.get('suppliers', id, parseSupplierRecord); }
@@ -166,16 +261,24 @@ export class FirestoreAdminCatalogRepository implements AdminCatalogRepository {
         if (action === 'updated' && (fields as ProductInput).sku !== current.sku) throw new ApiError(400, 'SKU_IMMUTABLE', 'SKU cannot be changed after creation.');
         const at = this.now().toISOString();
         const updated: AdminProduct = { ...current, ...(action === 'updated' ? fields : {}), version: current.version + 1, updatedAt: at };
+        if (action !== 'unpublished') requireMcbSpecifications(updated);
         if (action !== 'unpublished') {
           const supplier = await tx.get(db.collection('suppliers').doc(updated.supplierId));
           if (!supplier.exists) throw new ApiError(400, 'INVALID_SUPPLIER', 'Choose an existing active supplier.');
           const source = parseSupplierRecord(supplier.data(), supplier.id);
           if (source.status !== 'active' && (action === 'published' || updated.supplierId !== current.supplierId))
             throw new ApiError(400, 'INVALID_SUPPLIER', 'Choose an existing active supplier.');
+          requireSupplierProductUrl(updated, source);
         }
         if (action === 'published') { updated.state = 'published'; updated.publishedVersion = updated.version; }
         if (action === 'unpublished') { updated.state = 'draft'; delete updated.publishedVersion; }
         const result = parseProductRecord(updated, id);
+        if (action === 'updated' && result.unitCode !== current.unitCode) {
+          const unitLock = await tx.get(db.collection('inventoryProductUnits').doc(id));
+          if (unitLock.exists) throw new ApiError(409, 'STOCK_UNIT_IMMUTABLE', 'Unit cannot change after inventory is recorded. A reviewed conversion is required.');
+          const pools = await tx.get(db.collection('inventoryBalances').where('productId', '==', id).limit(1));
+          if (!pools.empty) throw new ApiError(409, 'STOCK_UNIT_IMMUTABLE', 'Unit cannot change after inventory is recorded. A reviewed conversion is required.');
+        }
         const projection = action === 'published' ? parsePublishedProduct(publicProjection(result, at), id) : null;
         const oldPublic = action !== 'updated' ? await tx.get(publicEntity) : null;
         removedImageIds = await this.imageLifecycle?.stage(tx, current.images ?? [], result.images ?? [],
@@ -249,7 +352,9 @@ export class FirestoreAdminCatalogRepository implements AdminCatalogRepository {
         if (kind === 'product') {
           const supplier = await tx.get(db.collection('suppliers').doc((input as ProductInput).supplierId));
           if (!supplier.exists) throw new ApiError(400, 'INVALID_SUPPLIER', 'Choose an existing active supplier.');
-          if (parseSupplierRecord(supplier.data(), supplier.id).status !== 'active') throw new ApiError(400, 'INVALID_SUPPLIER', 'Choose an existing active supplier.');
+          const source = parseSupplierRecord(supplier.data(), supplier.id);
+          if (source.status !== 'active') throw new ApiError(400, 'INVALID_SUPPLIER', 'Choose an existing active supplier.');
+          requireSupplierProductUrl(input as ProductInput, source);
         }
         const metadata = { id, schemaVersion: 1 as const, version: 1 as const, createdBy: identity.uid, createdAt: at, updatedAt: at };
         const record = kind === 'supplier'

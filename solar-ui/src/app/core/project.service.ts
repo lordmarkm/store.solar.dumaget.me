@@ -1,12 +1,12 @@
 import { computed, Inject, Injectable, Optional, Signal, signal } from '@angular/core';
 import {
-  BomItem, INSTALLATION_TYPES, isPlanningQuantity, NewProjectDraft, Project,
+  BomItem, INSTALLATION_TYPES, isPlanningQuantity, isValidFreeTextProtectionMetadata, NewProjectDraft, Project,
   PROJECT_CLASSIFICATIONS, ProjectDetails, SYSTEM_CONFIGURATIONS, WORK_SCOPES, GuestEquipmentList, GuestEquipmentListHistory,
 } from './models';
 import { FreeTextInput, PendingProduct, validateFreeText, validPendingProduct } from './project-bom';
 import { PLANNING_PRODUCTS } from './product-source';
 import { Product } from './models';
-import { ACCOUNT_PROJECT_STORE, AccountGuestCopy, AccountProjectAction, AccountProjectStore } from './account-project.service';
+import { ACCOUNT_PROJECT_STORE, AccountGuestCopy, AccountProjectAction, AccountProjectStore, ProjectListQuery, ProjectManagementAction } from './account-project.service';
 import { StoreApiError } from './store-api.service';
 import { emptyGuestList, guestListFingerprint, LEGACY_DRAFT_KEY, migrateGuestList, PendingGuestList, validGuestHistory } from './guest-lists';
 
@@ -59,9 +59,10 @@ function validBomItem(value: unknown): value is BomItem {
   if (!record(value) || !text(value['id']) || !isPlanningQuantity(value['quantity']) || !timestamp(value['createdAt']) || !timestamp(value['updatedAt']) || (value['notes'] !== undefined && typeof value['notes'] !== 'string')) return false;
   if (value['kind'] === 'store-product') {
     const product = value['product'];
-    return record(product) && text(product['productId']) && text(product['unitCode']) && (product['variantId'] === null || text(product['variantId']));
+    return value['componentCategory'] === undefined && value['componentProtectionType'] === undefined && value['amperage'] === undefined && record(product) && text(product['productId']) && text(product['unitCode']) && (product['variantId'] === null || text(product['variantId']));
   }
   if (value['kind'] !== 'free-text' || !text(value['title']) || typeof value['description'] !== 'string' || !text(value['unit']) || !record(value['estimate'])) return false;
+  if (!isValidFreeTextProtectionMetadata(value)) return false;
   const estimate = value['estimate'];
   if (estimate['kind'] === 'unpriced') return true;
   const price = estimate['unitPrice'];
@@ -103,6 +104,37 @@ export class ProjectService {
 
   refresh(): Promise<void> { return this.accountStore?.refresh() ?? Promise.resolve(); }
   loadMore(): Promise<void> { return this.accountStore?.loadMore() ?? Promise.resolve(); }
+  async fetchPage(query: ProjectListQuery, cursor: string | null = null): Promise<{ items: readonly Project[]; nextCursor: string | null; activeProjectId: string | null; preferencesVersion: number | null }> {
+    if (this.accountStore) return this.accountStore.queryPage(query, cursor);
+    const filtered = this.projects().filter(project =>
+      (!query.search || [project.name, project.location ?? ''].some(value => value.toLowerCase().includes(query.search!.trim().toLowerCase())))
+      && (!query.status || project.status === query.status) && (!query.classification || project.classification === query.classification)
+      && (!query.configuration || project.configuration === query.configuration) && (!query.workScope || project.workScope === query.workScope));
+    const start = cursor ? Math.max(0, filtered.findIndex(project => project.id === cursor) + 1) : 0;
+    const items = filtered.slice(start, start + (query.limit ?? 10));
+    return { items, nextCursor: start + items.length < filtered.length ? items.at(-1)?.id ?? null : null,
+      activeProjectId: this.activeProject()?.id ?? null, preferencesVersion: null };
+  }
+  async updateProject(id: string, input: NewProjectDraft, requestId: string, expectedVersion?: number): Promise<ProjectWriteResult> {
+    if (Object.keys(validateProjectInput(input)).length) return this.fail('Complete the required project fields.');
+    return this.manageForAccount(id, requestId, { action: 'edit-details', details: details(input) }, expectedVersion);
+  }
+  async archiveProject(id: string, requestId: string, expectedVersion?: number): Promise<ProjectWriteResult> {
+    return this.manageForAccount(id, requestId, { action: 'archive-project' }, expectedVersion);
+  }
+  async restoreProject(id: string, requestId: string, expectedVersion?: number): Promise<ProjectWriteResult> {
+    return this.manageForAccount(id, requestId, { action: 'restore-project' }, expectedVersion);
+  }
+  async duplicateProject(id: string, requestId: string, expectedVersion?: number): Promise<CreateProjectResult> {
+    if (!this.accountStore?.accountBacked()) return this.fail('Sign in with your account before duplicating a project.');
+    try { const project = await this.accountStore.manageProject(id, requestId, { action: 'duplicate-project' }, expectedVersion); return { ok: true, project }; }
+    catch (error) { return this.fail(this.message(error)); }
+  }
+  private async manageForAccount(id: string, requestId: string, action: ProjectManagementAction, expectedVersion?: number): Promise<ProjectWriteResult> {
+    if (!this.accountStore?.accountBacked()) return this.fail('Sign in with your account before editing a project.');
+    try { await this.accountStore.manageProject(id, requestId, action, expectedVersion); return { ok: true }; }
+    catch (error) { return this.fail(this.message(error)); }
+  }
   async loadProject(id: string): Promise<Project | null> {
     if (this.accountStore) return this.accountStore.accountBacked() ? this.accountStore.loadProject(id) : null;
     return this.projects().find(project => project.id === id) ?? null;
@@ -243,7 +275,13 @@ export class ProjectService {
     const id = itemId ?? `text-${requestId}`;
     if (!itemId && project.bom.items.some(item => item.id === id)) return { ok: true };
     const now = new Date().toISOString();
-    const item: BomItem = { kind: 'free-text', id, title: input.title.trim(), description: input.description.trim(), unit: input.unit.trim(), quantity: input.quantity, notes: input.notes.trim(), estimate: existing?.kind === 'free-text' ? existing.estimate : { kind: 'unpriced' }, createdAt: existing?.createdAt ?? now, updatedAt: now };
+    const metadata = {
+      componentCategory: input.componentCategory ?? (existing?.kind === 'free-text' ? existing.componentCategory : undefined),
+      componentProtectionType: input.componentProtectionType ?? (existing?.kind === 'free-text' ? existing.componentProtectionType : undefined),
+      amperage: input.amperage ?? (existing?.kind === 'free-text' ? existing.amperage : undefined),
+    };
+    if (!isValidFreeTextProtectionMetadata(metadata)) return this.fail('Check the protection type and amperage.');
+    const item: BomItem = { kind: 'free-text', id, title: input.title.trim(), description: input.description.trim(), unit: input.unit.trim(), quantity: input.quantity, notes: input.notes.trim(), estimate: existing?.kind === 'free-text' ? existing.estimate : { kind: 'unpriced' }, createdAt: existing?.createdAt ?? now, updatedAt: now, ...metadata };
     return this.replaceItems(project, itemId ? project.bom.items.map(line => line.id === itemId ? item : line) : [...project.bom.items, item]);
   }
 

@@ -1,11 +1,17 @@
 import { computed, effect, inject, Injectable, InjectionToken, Signal, signal } from '@angular/core';
-import { BomItem, GuestListCopyReceipt, ProductReference, Project, ProjectDetails, ProjectStatus, isPlanningQuantity } from './models';
-import { PendingProduct } from './project-bom';
+import { BomItem, GuestListCopyReceipt, ProductReference, Project, ProjectDetails, ProjectStatus, isPlanningQuantity, ProjectClassification, SystemConfiguration, WorkScope, isValidFreeTextProtectionMetadata } from './models';
+import { FreeTextInput, PendingProduct } from './project-bom';
 import { AuthSessionService } from './auth-session.service';
 import { PublicCatalogService } from './public-catalog.service';
 import { ProjectApiPath, StoreApiError, StoreApiService } from './store-api.service';
 
 export interface AccountProject extends Project { readonly version: number }
+export interface ProjectListQuery {
+  readonly search?: string; readonly status?: 'draft' | 'archived'; readonly classification?: ProjectClassification;
+  readonly configuration?: SystemConfiguration; readonly workScope?: WorkScope; readonly limit?: number;
+}
+export type ProjectManagementAction = { readonly action: 'edit-details'; readonly details: ProjectDetails }
+  | { readonly action: 'archive-project' | 'restore-project' | 'duplicate-project' };
 export interface AccountProjectPage {
   readonly items: readonly AccountProject[];
   readonly nextCursor: string | null;
@@ -19,7 +25,7 @@ export interface AccountGuestCopy {
 }
 export type AccountProjectAction =
   | { readonly action: 'add-items'; readonly items: readonly PendingProduct[]; readonly guest?: AccountGuestCopy }
-  | { readonly action: 'free-text'; readonly itemId?: string; readonly input: { readonly title: string; readonly description: string; readonly unit: string; readonly quantity: number; readonly notes: string } }
+  | { readonly action: 'free-text'; readonly itemId?: string; readonly input: FreeTextInput }
   | { readonly action: 'quantity'; readonly itemId: string; readonly quantity: number }
   | { readonly action: 'remove'; readonly itemId: string }
   | { readonly action: 'restore'; readonly itemId: string; readonly index: number };
@@ -34,6 +40,8 @@ export interface AccountProjectStore {
   readonly nextCursor: Signal<string | null>;
   refresh(): Promise<void>;
   loadMore(): Promise<void>;
+  queryPage(query: ProjectListQuery, cursor?: string | null): Promise<AccountProjectPage>;
+  manageProject(id: string, requestId: string, action: ProjectManagementAction, expectedVersion?: number): Promise<AccountProject>;
   loadProject(id: string): Promise<AccountProject | null>;
   createProject(details: ProjectDetails, requestId: string, items?: readonly PendingProduct[], guest?: AccountGuestCopy): Promise<{ project: AccountProject; copyReceipt: GuestListCopyReceipt | null }>;
   command(projectId: string, requestId: string, command: AccountProjectAction): Promise<{ project: AccountProject; copyReceipt: GuestListCopyReceipt | null }>;
@@ -74,7 +82,8 @@ function parseBomItem(value: unknown): value is BomItem {
       && exact(product, ['productId', 'variantId', 'unitCode']) && UUID.test(String(product['productId']))
       && product['variantId'] === null && text(product['unitCode'], 64);
   }
-  return value['kind'] === 'free-text' && exact(value, ['id', 'kind', 'title', 'description', 'unit', 'estimate', 'quantity', 'createdAt', 'updatedAt'], ['notes'])
+  return value['kind'] === 'free-text' && exact(value, ['id', 'kind', 'title', 'description', 'unit', 'estimate', 'quantity', 'createdAt', 'updatedAt'], ['notes', 'componentCategory', 'componentProtectionType', 'amperage'])
+    && isValidFreeTextProtectionMetadata(value)
     && text(value['title'], 240) && typeof value['description'] === 'string' && value['description'].length <= 2000
     && text(value['unit'], 80) && record(value['estimate']) && exact(value['estimate'], ['kind']) && value['estimate']['kind'] === 'unpriced'
     && optionalText(value['notes'], 2000, true);
@@ -251,6 +260,7 @@ export class AccountProjectService implements AccountProjectStore {
         return value as { activeProjectId: string | null; preferencesVersion: number };
       });
       if (!this.current(context)) throw new StoreApiError('session-changed');
+      this.stateEpoch++;
       this.activeIdState.set(response.activeProjectId); this.preferencesVersionState.set(response.preferencesVersion);
       this.activeRequest = undefined;
       return response.activeProjectId;
@@ -269,6 +279,48 @@ export class AccountProjectService implements AccountProjectStore {
     bytes[6] = (bytes[6] & 0x0f) | 0x40; bytes[8] = (bytes[8] & 0x3f) | 0x80;
     const hex = bytes.map(byte => byte.toString(16).padStart(2, '0')).join('');
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  async queryPage(query: ProjectListQuery, cursor: string | null = null): Promise<AccountProjectPage> {
+    const context = this.requireContext(), epoch = this.stateEpoch, sequence = ++this.listReadSequence;
+    const filters: Record<string, string> = {};
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') filters[key] = String(value);
+    const page = await this.api.projectRequest('/api/v1/me/projects', 'GET', undefined, value => this.parsePage(value, context.uid), cursor, filters);
+    if (!this.current(context) || epoch !== this.stateEpoch || sequence !== this.listReadSequence) throw new StoreApiError('session-changed');
+    for (const project of page.items) this.upsert(project, context);
+    this.projectOwner.set(context.identity);
+    this.activeIdState.set(page.activeProjectId); this.preferencesVersionState.set(page.preferencesVersion);
+    if (page.activeProjectId && !this.projects().some(project => project.id === page.activeProjectId)) void this.loadProject(page.activeProjectId);
+    this.error.set(null);
+    return page;
+  }
+
+  async manageProject(id: string, requestId: string, action: ProjectManagementAction, expectedVersion?: number): Promise<AccountProject> {
+    if (!UUID.test(id) || !UUID.test(requestId) || (action.action === 'edit-details' ? !validDetails(action.details)
+      : !['archive-project', 'restore-project', 'duplicate-project'].includes(action.action))) throw new StoreApiError('invalid-input');
+    const context = this.requireContext(), current = this.projects().find(project => project.id === id);
+    if (!current) throw new StoreApiError('not-found');
+    const path: ProjectApiPath = `/api/v1/me/projects/${id}/management`;
+    if (expectedVersion !== undefined && !version(expectedVersion)) throw new StoreApiError('invalid-input');
+    const request = this.requestBody(context, path, requestId, action, { expectedVersion: expectedVersion ?? current.version, ...action });
+    try {
+      const result = await this.api.projectRequest(path, 'POST', request.body, value => {
+        if (!record(value) || !exact(value, ['project', 'activeProjectId', 'preferencesVersion'])
+          || !(value['activeProjectId'] === null || UUID.test(String(value['activeProjectId'])))
+          || !(value['preferencesVersion'] === null || version(value['preferencesVersion']))) throw new StoreApiError('invalid-response');
+        return { project: parseProject(value['project'], context.uid), activeProjectId: value['activeProjectId'] as string | null,
+          preferencesVersion: value['preferencesVersion'] as number | null };
+      });
+      if (!this.current(context)) throw new StoreApiError('session-changed');
+      if (action.action !== 'duplicate-project' && result.project.id !== id) throw new StoreApiError('invalid-response');
+      this.acceptMutation(result.project, context);
+      this.activeIdState.set(result.activeProjectId); this.preferencesVersionState.set(result.preferencesVersion);
+      this.activeRequest = undefined;
+      return result.project;
+    } catch (error) {
+      if (error instanceof StoreApiError && error.code === 'conflict' && this.current(context)) await this.loadProject(id);
+      throw error;
+    }
   }
 
   private async fetchPage(context: RequestContext, cursor: string | null): Promise<AccountProjectPage> {
@@ -298,6 +350,7 @@ export class AccountProjectService implements AccountProjectStore {
     if (value.action === 'add-items') return Array.isArray(value.items) && value.items.length > 0 && value.items.length <= 200
       && value.items.every(validItemInput) && (!value.guest || this.validGuest(value.guest));
     if (value.action === 'free-text') return (!value.itemId || text(value.itemId, 128)) && text(value.input.title, 240)
+      && isValidFreeTextProtectionMetadata(value.input)
       && optionalText(value.input.description, 2000, true) && text(value.input.unit, 80)
       && isPlanningQuantity(value.input.quantity) && optionalText(value.input.notes, 2000, true);
     if (value.action === 'quantity') return text(value.itemId, 128) && isPlanningQuantity(value.quantity);

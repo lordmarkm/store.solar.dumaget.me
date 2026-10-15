@@ -81,7 +81,7 @@ describe('backend app bootstrap', () => {
       if (token === 'domain-admin') return identity({ email: 'person@solar.dumaget.me' });
       return identity();
     });
-    const app = track(buildApp(enabledConfig, { verifier, logger: false }));
+    const app = track(buildApp(enabledConfig, { verifier, readinessProbe: async () => { throw new Error('private dependency failure'); }, logger: false }));
 
     it('rejects missing and malformed bearer headers without verifying', async () => {
       for (const authorization of [undefined, 'Basic token', 'Bearer two words', 'Bearer token,other']) {
@@ -143,10 +143,21 @@ describe('backend app bootstrap', () => {
       assert.doesNotMatch(unexpected.body, /secret verifier details|explode/);
     });
 
-    it('does not expose connected readiness while enabled', async () => {
+    it('reports an unavailable dependency without exposing its failure details', async () => {
       const response = await app.inject({ method: 'GET', url: '/ready' });
       assert.equal(response.statusCode, 503);
+      assert.deepEqual(response.json(), { status: 'not-ready', service: 'solar-store-api' });
+      assert.equal(response.headers['retry-after'], '60');
+      assert.doesNotMatch(response.body, /private dependency/);
     });
+  });
+  it('reports connected readiness and caches probes across concurrent callers', async () => {
+    let calls = 0;
+    const app = track(buildApp(enabledConfig, { logger: false, readinessProbe: async () => { calls++; } }));
+    const results = await Promise.all(Array.from({ length: 10 }, () => app.inject({ method: 'GET', url: '/ready' })));
+    assert.ok(results.every(response => response.statusCode === 200 && response.json().status === 'ready'));
+    assert.equal(calls, 1);
+    assert.equal(results[0]!.headers['cache-control'], 'no-store');
   });
 
   describe('HTTP hardening and routing', () => {

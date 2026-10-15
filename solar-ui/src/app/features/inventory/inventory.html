@@ -1,8 +1,131 @@
-<div class="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p class="eyebrow mb-2">Operations / product master</p><h1 class="page-title">SKU & inventory</h1><p class="mt-2 text-sm text-secondary-foreground">A single view of equipment, supplier sourcing, and depot allocation.</p></div><a routerLink="/admin/suppliers" class="kt-btn kt-btn-light"><i class="ki-outline ki-award" aria-hidden="true"></i>View suppliers</a></div>
-<div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><article class="kt-card p-5"><p class="eyebrow">Catalog</p><p class="mt-3 text-2xl font-semibold">{{ products.length }} <span class="text-sm font-normal text-secondary-foreground">SKUs</span></p><p class="mt-2 text-xs text-secondary-foreground">{{ categories.length }} equipment categories</p></article><article class="kt-card p-5"><p class="eyebrow">Supplier portfolio</p><p class="mt-3 text-2xl font-semibold">{{ suppliers.length }} <span class="text-sm font-normal text-secondary-foreground">suppliers</span></p><p class="mt-2 text-xs text-secondary-foreground">Mapped to primary sourcing</p></article><article class="kt-card p-5"><p class="eyebrow">Sample retail value</p><p class="mt-3 text-2xl font-semibold">{{ allocatedValue | currency:'PHP':'symbol':'1.0-0' }}</p><p class="mt-2 text-xs text-secondary-foreground">Not landed cost or live valuation</p></article><article class="kt-card p-5"><p class="eyebrow">Stock attention</p><p class="mt-3 text-2xl font-semibold">1 <span class="text-sm font-normal text-secondary-foreground">low allocation</span></p><p class="mt-2 text-xs text-secondary-foreground">Combiner box · 2 sample units</p></article></div>
-<section class="kt-card"><header class="kt-card-header"><h2 class="kt-card-title">Master equipment list</h2><span class="text-xs text-secondary-foreground">Sample dataset · read-only</span></header><div class="grid gap-4 border-b border-border p-5 sm:grid-cols-2 xl:grid-cols-[1fr_190px_170px_auto]"><div><label for="inventory-search" class="mb-2 block text-xs font-medium">Search equipment</label><input type="search" id="inventory-search" class="kt-input w-full" placeholder="SKU, product, or brand…" [ngModel]="search()" (ngModelChange)="search.set($event)" /></div><div><label for="supplier-filter" class="mb-2 block text-xs font-medium">Primary supplier</label><select id="supplier-filter" class="kt-select w-full" [ngModel]="supplier()" (ngModelChange)="supplier.set($event)"><option>All suppliers</option>@for (item of suppliers; track item.id) { <option [value]="item.id">{{ item.name }}</option> }</select></div><div><label for="category-filter" class="mb-2 block text-xs font-medium">Equipment line</label><select id="category-filter" class="kt-select w-full" [ngModel]="category()" (ngModelChange)="category.set($event)"><option>All categories</option>@for (item of categories; track item) { <option>{{ item }}</option> }</select></div><button class="kt-btn kt-btn-light self-end" type="button" (click)="reset()"><i class="ki-outline ki-cross" aria-hidden="true"></i>Reset</button></div>
-  <div class="overflow-x-auto" role="region" aria-label="Equipment inventory table" tabindex="0"><table class="kt-table min-w-[900px] text-sm"><thead><tr><th scope="col">SKU & equipment</th><th scope="col">Primary supplier</th><th scope="col">Depot allocation</th><th scope="col">Unit price</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>
-    @for (product of filtered(); track product.id) { <tr><td><div class="flex items-center gap-3"><div class="product-stage w-16 shrink-0 rounded-md"><app-product-visual [kind]="product.visual" /></div><div><p class="mb-1 font-mono text-[10px] text-secondary-foreground">{{ product.sku }}</p><p class="font-medium">{{ product.name }}</p><p class="mt-1 text-[11px] text-secondary-foreground">{{ product.brand }} · {{ product.spec }}</p></div></div></td><td><p class="font-medium">{{ supplierName(product.supplierId) }}</p><p class="mt-1 text-xs text-secondary-foreground">{{ product.category }}</p></td><td><p class="font-medium" [class.text-amber-600]="product.stock <= 2">{{ product.stock }} units</p><p class="mt-1 text-xs text-secondary-foreground">{{ product.depot }} @if (product.stock <= 2) { <span>· Low allocation</span> }</p></td><td><p class="font-medium">{{ product.price | currency:'PHP':'symbol':'1.0-0' }}</p><p class="mt-1 text-xs text-secondary-foreground">VAT included</p></td><td><app-tooltip [label]="'View ' + product.sku + ' details'"><button class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" type="button" (click)="detail(product)" [attr.aria-label]="'View ' + product.sku + ' details'" [attr.title]="'View ' + product.sku + ' details'"><i class="ki-outline ki-eye text-base" aria-hidden="true"></i></button></app-tooltip></td></tr> } @empty { <tr><td colspan="5" class="py-10 text-center"><p class="font-medium">No matching SKUs</p><p class="mt-2 text-xs text-secondary-foreground">Clear your filters or try another search.</p></td></tr> }
-  </tbody></table></div><footer class="kt-card-footer justify-between gap-3 text-xs text-secondary-foreground"><span>Showing {{ filtered().length }} of {{ products.length }} SKUs</span><span>All amounts in PHP</span></footer>
-</section>
-<p class="mt-5 text-xs leading-5 text-secondary-foreground">Illustrative supplier and inventory data adapted from the design reference. Live inventory, purchase orders, and stock adjustments will be connected in a later implementation.</p>
+<div class="mb-6 flex flex-wrap items-end justify-between gap-4">
+  <div><p class="eyebrow mb-2">Operations / physical stock</p><h1 class="page-title">Inventory</h1>
+    <p class="mt-2 text-sm text-secondary-foreground">Track stock, record counts, and transfer products between locations.</p></div>
+</div>
+
+@if (!authorized()) {
+  <section class="kt-card p-6" aria-live="polite">
+    @if (accessStatus() === 'checking') { <p class="font-medium">Checking admin access…</p> }
+    @else if (accessStatus() === 'forbidden') { <p class="font-medium">Admin access required</p><p class="mt-2 text-sm text-secondary-foreground">This inventory contains private physical-stock records.</p> }
+    @else if (accessStatus() === 'signed-out') { <p class="font-medium">Sign in with an authorized admin account to view inventory.</p> }
+    @else { <p class="font-medium">Admin access is unavailable.</p><button type="button" class="kt-btn kt-btn-light mt-4" (click)="retryAccess()">Retry access check</button> }
+  </section>
+} @else {
+  <section class="kt-card mb-5 p-5">
+    <div class="flex flex-wrap items-end gap-3">
+      <div class="min-w-0 basis-full sm:basis-auto sm:flex-1 sm:min-w-64"><label for="inventory-location" class="mb-2 block text-xs font-medium">Physical location</label>
+        <select #locationSelect id="inventory-location" class="kt-select w-full" [ngModel]="selectedLocationId()" (ngModelChange)="selectLocation($event, locationSelect)" [disabled]="stockFlowBusy() || locationSaveBusy()">
+          <option value="">Choose a location</option>
+          @for (location of locations(); track location.id) { <option [value]="location.id">{{ location.code }} · {{ location.name }} ({{ location.status }})</option> }
+        </select>
+      </div>
+      <button type="button" class="kt-btn kt-btn-light" (click)="openCreateLocation()" [disabled]="locationSaveBusy()"><i class="ki-outline ki-plus" aria-hidden="true"></i>New location</button>
+      @if (selectedLocation()) { <button type="button" class="kt-btn kt-btn-light" (click)="openEditLocation()" [disabled]="locationSaveBusy()"><i class="ki-outline ki-pencil" aria-hidden="true"></i>Edit location</button> }
+      @if (locationCursor()) { <button type="button" class="kt-btn kt-btn-light" (click)="loadMoreLocations()" [disabled]="locationLoading()">{{ locationLoading() ? 'Loading…' : 'More locations' }}</button> }
+    </div>
+    @if (locationError()) { <div class="mt-3 flex flex-wrap items-center gap-3" role="alert"><p class="text-sm text-destructive">{{ locationError() }}</p><button type="button" class="kt-btn kt-btn-light kt-btn-sm" (click)="loadLocations(true)">Retry</button></div> }
+    @if (selectedLocation(); as location) {
+      <p class="mt-3 text-xs text-secondary-foreground">{{ location.code }} · {{ location.status === 'active' ? 'Active location' : 'Inactive location — stock changes are blocked' }}</p>
+    } @else if (!locationLoading() && !locationError()) { <p class="mt-3 text-sm text-secondary-foreground">Create a location to begin recording physical stock.</p> }
+  </section>
+
+  @if (locationForm(); as form) {
+    <section class="kt-card mb-5 p-5" aria-labelledby="location-form-title">
+      <div class="mb-4 flex items-center justify-between gap-3"><h2 id="location-form-title" class="kt-card-title">{{ form === 'create' ? 'New inventory location' : 'Edit inventory location' }}</h2>
+        <button type="button" class="kt-btn kt-btn-light kt-btn-sm" (click)="closeLocationForm()" [disabled]="locationSaveBusy()">Cancel</button></div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div><label for="location-code" class="mb-2 block text-xs font-medium">Code<span class="solar-required-marker" aria-hidden="true">*</span></label><input id="location-code" aria-required="true" class="kt-input w-full" maxlength="32" [readonly]="form === 'edit'" [disabled]="locationSaveBusy()" [ngModel]="locationCode()" (ngModelChange)="locationCode.set($event)" />
+          @if (form === 'edit') { <p class="mt-1 text-xs text-secondary-foreground">The location code cannot be changed.</p> }</div>
+        <div><label for="location-name" class="mb-2 block text-xs font-medium">Name<span class="solar-required-marker" aria-hidden="true">*</span></label><input id="location-name" aria-required="true" class="kt-input w-full" maxlength="160" [disabled]="locationSaveBusy()" [ngModel]="locationName()" (ngModelChange)="locationName.set($event)" /></div>
+        <div class="sm:col-span-2"><label for="location-notes" class="mb-2 block text-xs font-medium">Notes</label><textarea id="location-notes" class="kt-input min-h-20 w-full" maxlength="1000" [disabled]="locationSaveBusy()" [ngModel]="locationNotes()" (ngModelChange)="locationNotes.set($event)"></textarea></div>
+        @if (form === 'edit') { <div><label for="location-status" class="mb-2 block text-xs font-medium">Status<span class="solar-required-marker" aria-hidden="true">*</span></label><select id="location-status" aria-required="true" class="kt-select w-full" [disabled]="locationSaveBusy()" [ngModel]="locationStatus()" (ngModelChange)="locationStatus.set($event)"><option value="active">Active</option><option value="inactive">Inactive</option></select></div> }
+      </div>
+      @if (locationSaveError()) { <p class="mt-3 text-sm text-destructive" role="alert">{{ locationSaveError() }}</p> }
+      <button type="button" class="kt-btn kt-btn-light mt-4" (click)="saveLocation()" [disabled]="locationSaveBusy()">{{ locationSaveBusy() ? 'Saving…' : 'Save location' }}</button>
+    </section>
+  }
+
+  <p class="kt-card mb-5 border border-border p-4 text-sm leading-6 text-secondary-foreground">Stock shown here is held at your locations, not by suppliers. Unknown means no count has been recorded.</p>
+
+  @if (selectedLocation()) {
+    <section class="kt-card">
+      <header class="kt-card-header gap-4 py-4"><div class="min-w-0 basis-full sm:basis-0 sm:flex-1"><h2 class="kt-card-title break-words leading-6">Products at {{ selectedLocation()?.name }}</h2></div>
+        @if (!exporting()) { <button type="button" class="kt-btn kt-btn-light kt-btn-sm" (click)="exportFilteredBalances()" [disabled]="inventoryLoading() || !!inventoryError() || !!inventoryPageError() || skuDebouncePending() || !!skuError() || stockFlowBusy()">Export filtered balances</button> }
+        @else { <div class="flex flex-wrap items-center gap-2"><span class="text-xs text-secondary-foreground" role="status">{{ exportProgress() }}</span><button type="button" class="kt-btn kt-btn-light kt-btn-sm" (click)="cancelExport()">Cancel export</button></div> }
+      </header>
+      @if (exportError()) { <p class="border-b border-border px-5 py-3 text-sm text-destructive" role="alert">{{ exportError() }}</p> }
+      <div class="flex flex-wrap items-end gap-3 border-b border-border p-5">
+        <div class="grid min-w-0 flex-1 items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_170px_minmax(180px,1fr)_170px]">
+        <div><label for="inventory-sku" class="mb-2 block text-xs font-medium">SKU prefix</label><input id="inventory-sku" type="search" class="kt-input w-full" maxlength="64" placeholder="Start of SKU…" [ngModel]="skuPrefix()" (ngModelChange)="setSkuPrefix($event)" [disabled]="stockFlowBusy()" />
+          @if (skuError()) { <p class="mt-1 text-xs text-destructive" role="alert">{{ skuError() }}</p> }</div>
+        <div><label for="inventory-category" class="mb-2 block text-xs font-medium">Category</label><select id="inventory-category" class="kt-select w-full" [ngModel]="category()" (ngModelChange)="setCategory($event)" [disabled]="stockFlowBusy()"><option value="">All categories</option>@for (item of categories; track item) { <option [value]="item">{{ item }}</option> }</select></div>
+        <div><label for="inventory-supplier" class="mb-2 block text-xs font-medium">Supplier</label><select id="inventory-supplier" class="kt-select w-full" [ngModel]="supplierId()" (ngModelChange)="setSupplier($event)" [disabled]="stockFlowBusy()"><option value="">All suppliers</option>@for (supplier of suppliers(); track supplier.id) { <option [value]="supplier.id">{{ supplier.name }} ({{ supplier.status }})</option> }</select>
+          @if (supplierCursor()) { <button type="button" class="mt-1 text-xs text-primary hover:underline" (click)="loadMoreSuppliers()" [disabled]="suppliersLoading()">{{ suppliersLoading() ? 'Loading suppliers…' : 'Load more supplier options' }}</button> }
+          @if (supplierError()) { <div class="mt-1 flex flex-wrap items-center gap-2"><p class="text-xs text-destructive" role="alert">{{ supplierError() }}</p><button type="button" class="text-xs text-primary hover:underline" (click)="loadSupplierOptions()" [disabled]="suppliersLoading()">Retry suppliers</button></div> }</div>
+        <div><label for="inventory-stock-status" class="mb-2 block text-xs font-medium">Stock status</label><select id="inventory-stock-status" class="kt-select w-full" [ngModel]="stockStatus()" (ngModelChange)="setStockStatus($event)" [disabled]="stockFlowBusy()"><option value="">All statuses</option><option value="unknown">Unknown</option><option value="zero">Zero</option><option value="low">Low</option><option value="in-stock">In stock</option></select></div>
+        </div>
+        <app-tooltip label="Clear filters" class="mb-1 shrink-0"><button type="button" class="kt-btn kt-btn-icon kt-btn-light kt-btn-sm" aria-label="Clear filters" title="Clear filters" (click)="clearFilters()" [disabled]="stockFlowBusy()"><i class="ki-outline ki-cross" aria-hidden="true"></i></button></app-tooltip>
+      </div>
+      @if (inventoryError()) { <div class="flex flex-wrap items-center gap-3 p-5" role="alert"><p class="text-sm text-destructive">{{ inventoryError() }}</p><button type="button" class="kt-btn kt-btn-light kt-btn-sm" (click)="retryInventory()">Retry</button></div> }
+      <ng-template #inventoryEmpty>
+        @if (!inventoryLoading() && !inventoryError()) {
+          <p class="font-medium">{{ inventoryCursor() ? 'No matching products on this page' : 'No products match these filters' }}</p>
+          <p class="mt-2 text-xs text-secondary-foreground">{{ inventoryCursor() ? 'Choose Next to see more results.' : 'Clear filters or try another SKU prefix.' }}</p>
+        }
+      </ng-template>
+      <app-ktui-table [rows]="rows()" [rowKey]="tableRowKey" label="Physical inventory by product" [busy]="inventoryLoading()" [emptyTemplate]="inventoryEmpty">
+        <ng-template solarTableColumn="product" [solarTableColumnOf]="rows()" header="Product" width="30%" let-row>
+<div class="flex min-w-0 items-center gap-3"><div class="product-stage h-16 w-20 shrink-0 overflow-hidden"><app-product-visual [kind]="visualKind(row)" [images]="row.product.images" [alt]="row.product.name" /></div><div class="min-w-0"><p class="font-mono text-[10px] text-secondary-foreground">{{ row.product.sku }}</p><p class="font-medium">{{ row.product.name }}</p><p class="mt-1 text-xs text-secondary-foreground">{{ row.product.brand }} · {{ row.product.category || 'Category not set' }}</p></div></div>
+        </ng-template>
+        <ng-template solarTableColumn="supplier" [solarTableColumnOf]="rows()" header="Supplier" width="18%" let-row>
+{{ supplierName(row.product.supplierId) }}
+        </ng-template>
+        <ng-template solarTableColumn="onHand" [solarTableColumnOf]="rows()" header="On hand" width="16%" let-row>
+<span [class]="stockStatusBadge(row)">{{ stockStatusLabel(row) }}</span>
+                  @if (row.balance; as balance) { <p class="mt-2 font-semibold">{{ balance.onHand | number }} {{ balance.unitCode }}</p> } @else { <p class="mt-2 font-medium">No balance recorded</p> }
+                  <p class="mt-2 text-xs text-secondary-foreground">Reorder point: {{ row.settings?.reorderPoint === null || row.settings?.reorderPoint === undefined ? 'Unset' : (row.settings?.reorderPoint | number) + ' ' + unitLabel(row) }}</p>
+        </ng-template>
+        <ng-template solarTableColumn="updated" [solarTableColumnOf]="rows()" header="Updated" width="20%" let-row>
+@if (row.balance; as balance) { <p>{{ balance.updatedAt | date:'medium' }}</p><p class="mt-1 text-xs text-secondary-foreground">Observed {{ balance.observedAt | date:'medium' }}</p> } @else { <span class="text-secondary-foreground">—</span> }
+        </ng-template>
+        <ng-template solarTableColumn="operations" [solarTableColumnOf]="rows()" header="Operations" width="16%" let-row>
+
+                  <div class="flex min-w-0 flex-wrap gap-2">
+                    @if (selectedLocation()?.status === 'inactive') { <span class="w-full text-xs text-secondary-foreground">Inactive location</span> }
+                    @if (stockNeedsReload()[row.product.id]) { <app-tooltip label="Reload row"><button type="button" class="kt-btn kt-btn-light kt-btn-icon kt-btn-sm" (click)="reloadInventoryRow(row)" [disabled]="inventoryLoading()" [attr.aria-label]="'Reload row: ' + row.product.sku" title="Reload row"><i class="ki-outline ki-arrows-circle" aria-hidden="true"></i></button></app-tooltip> }
+                    <app-tooltip [label]="!row.product.unitCode ? 'Set a product unit before recording stock' : 'Quantity operations'" [focusable]="!row.product.unitCode">
+                      <button type="button" class="kt-btn kt-btn-light kt-btn-icon kt-btn-sm kt-btn-grouped-action" [cdkMenuTriggerFor]="quantityMenu" [attr.aria-label]="'Quantity operations: ' + row.product.sku" [disabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending() || selectedLocation()?.status !== 'active' || !row.product.unitCode || !!stockNeedsReload()[row.product.id]" title="Quantity operations"><i class="ki-outline ki-cube-2" aria-hidden="true"></i><i class="ki-outline ki-down solar-action-chevron" aria-hidden="true"></i></button>
+                    </app-tooltip>
+                    <ng-template #quantityMenu>
+                      <div cdkMenu class="inventory-operation-menu grid gap-2 rounded-lg border border-border bg-card p-3 text-foreground shadow-lg" [attr.aria-label]="'Quantity operations: ' + row.product.sku">
+                        <button type="button" cdkMenuItem class="kt-btn kt-btn-light kt-btn-sm w-full justify-start" (cdkMenuItemTriggered)="openCountDialog(row)" [cdkMenuItemDisabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending() || hasPendingRetry(row) || selectedLocation()?.status !== 'active' || !row.product.unitCode || !!stockNeedsReload()[row.product.id]" [disabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending() || hasPendingRetry(row) || selectedLocation()?.status !== 'active' || !row.product.unitCode || !!stockNeedsReload()[row.product.id]">Physical count</button>
+                        <button type="button" cdkMenuItem class="kt-btn kt-btn-light kt-btn-sm w-full justify-start" (cdkMenuItemTriggered)="openStockDialog(row)" [cdkMenuItemDisabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending() || hasPendingRetry(row) || selectedLocation()?.status !== 'active' || !row.product.unitCode || !!stockNeedsReload()[row.product.id] || !row.balance" [disabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending() || hasPendingRetry(row) || selectedLocation()?.status !== 'active' || !row.product.unitCode || !!stockNeedsReload()[row.product.id] || !row.balance" [title]="row.balance ? 'Receive stock' : 'Record a physical count first'">Receive stock</button>
+                        @if (row.balance) { <button type="button" cdkMenuItem class="kt-btn kt-btn-light kt-btn-sm w-full justify-start" (cdkMenuItemTriggered)="openTransferDialog(row)" [cdkMenuItemDisabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending() || hasPendingRetry(row) || selectedLocation()?.status !== 'active' || !row.product.unitCode || !!stockNeedsReload()[row.product.id]" [disabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending() || hasPendingRetry(row) || selectedLocation()?.status !== 'active' || !row.product.unitCode || !!stockNeedsReload()[row.product.id]">Transfer</button> }
+                        @if (retryInputs()[retryKey(row)]) { <button type="button" cdkMenuItem class="kt-btn kt-btn-light kt-btn-sm w-full justify-start" (cdkMenuItemTriggered)="retryStock(row)" [disabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending()" [cdkMenuItemDisabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending()">Retry unchanged request</button> }
+                        @if (retryCountInputs()[retryKey(row)]) { <button type="button" cdkMenuItem class="kt-btn kt-btn-light kt-btn-sm w-full justify-start" (cdkMenuItemTriggered)="retryCount(row)" [disabled]="stockFlowBusy()" [cdkMenuItemDisabled]="stockFlowBusy()">Retry count</button> }
+                        @if (retryTransferInputs()[retryKey(row)]) { <button type="button" cdkMenuItem class="kt-btn kt-btn-light kt-btn-sm w-full justify-start" (cdkMenuItemTriggered)="retryTransfer(row)" [disabled]="stockFlowBusy()" [cdkMenuItemDisabled]="stockFlowBusy()">Retry transfer</button> }
+                      </div>
+                    </ng-template>
+                    <app-tooltip label="Other operations"><button type="button" class="kt-btn kt-btn-light kt-btn-icon kt-btn-sm kt-btn-grouped-action" [cdkMenuTriggerFor]="otherMenu" [attr.aria-label]="'Other operations: ' + row.product.sku" [disabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending()" title="Other operations"><i class="ki-outline ki-dots-horizontal" aria-hidden="true"></i><i class="ki-outline ki-down solar-action-chevron" aria-hidden="true"></i></button></app-tooltip>
+                    <ng-template #otherMenu>
+                      <div cdkMenu class="inventory-operation-menu grid gap-2 rounded-lg border border-border bg-card p-3 text-foreground shadow-lg" [attr.aria-label]="'Other operations: ' + row.product.sku">
+                        <button type="button" cdkMenuItem class="kt-btn kt-btn-light kt-btn-sm w-full justify-start" (cdkMenuItemTriggered)="openSettingsDialog(row)" [cdkMenuItemDisabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending() || hasPendingRetry(row) || selectedLocation()?.status !== 'active' || !row.product.unitCode || !!stockNeedsReload()[row.product.id]" [disabled]="stockFlowBusy() || inventoryLoading() || skuDebouncePending() || hasPendingRetry(row) || selectedLocation()?.status !== 'active' || !row.product.unitCode || !!stockNeedsReload()[row.product.id]">Set reorder point</button>
+                        <button type="button" cdkMenuItem class="kt-btn kt-btn-light kt-btn-sm w-full justify-start" (cdkMenuItemTriggered)="toggleHistory(row)" [cdkMenuItemDisabled]="historyTriggerDisabled()" [disabled]="historyTriggerDisabled()">View Movement history</button>
+                        @if (retrySettingsInputs()[retryKey(row)]) { <button type="button" cdkMenuItem class="kt-btn kt-btn-light kt-btn-sm w-full justify-start" (cdkMenuItemTriggered)="retrySettings(row)" [disabled]="stockFlowBusy()" [cdkMenuItemDisabled]="stockFlowBusy()">Retry reorder point</button> }
+                      </div>
+                    </ng-template>
+                  </div>
+                  @if (stockErrors()[row.product.id]) { <p class="mt-2 text-xs text-destructive" role="alert">{{ stockErrors()[row.product.id] }}</p> }
+                  @if (settingsErrors()[row.product.id]) { <p class="mt-2 text-xs text-destructive" role="alert">{{ settingsErrors()[row.product.id] }}</p> }
+        </ng-template>
+      </app-ktui-table>
+      @if (inventoryLoading()) { <p class="p-4 text-center text-xs text-secondary-foreground" aria-live="polite">Loading physical inventory…</p> }
+      @if (inventoryPageError()) { <div class="flex flex-wrap items-center gap-3 p-4" role="alert"><p class="text-sm text-destructive">{{ inventoryPageError() }}</p><button type="button" class="kt-btn kt-btn-light kt-btn-sm" (click)="retryInventoryPage()" [disabled]="inventoryPageControlsDisabled()">Retry page</button></div> }
+      <footer class="kt-card-footer flex-wrap justify-between gap-3">
+        <button type="button" class="kt-btn kt-btn-light" (click)="previousInventoryPage()" [disabled]="inventoryPage() === 1 || inventoryPageControlsDisabled()">Previous</button>
+        <span class="text-xs text-secondary-foreground" aria-live="polite">Page {{ inventoryPage() }} · 10 per page</span>
+        <button type="button" class="kt-btn kt-btn-light" (click)="nextInventoryPage()" [disabled]="!inventoryCursor() || inventoryPageControlsDisabled()">Next</button>
+      </footer>
+    </section>
+  }
+}

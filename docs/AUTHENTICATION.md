@@ -36,15 +36,39 @@ prevent duplicate popups. The existing dialog remains for signed-in account
 review or an unavailable-provider explanation. Cart and pending requests are
 retained; login does not copy or assign old preview projects.
 
-Customer and admin login entry points share `AuthNavigationService`. Only a new
-user-initiated login, an SDK-observed Firebase session, completed popup operation,
-and current server-confirmed admin authorization can trigger the post-login
-redirect. `/admin` is the admin home route and redirects to `/admin/products`.
-Email/domain eligibility alone never redirects a customer into administration.
-Restoring an existing session does not pull users away from shopping. Navigation,
-account changes, sign-out or disposal invalidate pending redirects; popup errors
-remain sanitized and retryable. No Firebase provider, claims, rules or cloud
-configuration changes are part of this UX update.
+Customer and admin login entry points share `AuthNavigationService`. Admins who
+complete a user-initiated Google popup and are confirmed by the current `/me`
+response as authorized are routed from `/admin` to `/admin/products`. Customer
+navigation is described in the 2026-10-13 update below. Email/domain eligibility
+alone never authorizes administration. Restoring an existing session does not
+pull users away from shopping. Navigation, account changes, sign-out or disposal
+invalidate pending redirects; popup errors remain sanitized and retryable. No
+Firebase provider, claims, rules or cloud configuration changes are part of this
+UX update.
+
+## Customer post-login navigation (2026-10-13)
+
+Customer navigation occurs only after a user-initiated Google popup completes,
+Firebase observes a new identity, and the current `/me` response matches that
+identity's UID and confirms `adminAuthorized: false`. The service uses the URL's
+`returnUrl` query parameter, captured when sign-in began; when it is missing or
+unsafe, the destination is `/catalog`, not a previously retained intent. Return targets must pass the existing
+`safeCustomerReturnUrl` allowlist/pure helper, which rejects external, admin,
+encoded and malformed targets. An admin is routed from `/admin` to
+`/admin/products` regardless of a customer `returnUrl`.
+
+Restoring a session does not redirect. Route changes, account changes, logout or
+service disposal cancel pending responses. Forbidden API errors and network
+failures do not prove that a user is not an admin and do not trigger customer
+navigation. Guest cart contents and pending intents are preserved and never
+executed automatically by sign-in.
+
+Verification: 79 focused tests across six files and the production build passed.
+Coverage includes ordinary customers, safe/unsafe URL targets, unchanged admin
+home navigation, restored sessions, API errors, popup cancellation, delayed
+responses and goodbye navigation. The build retains the existing initial-bundle
+warning (758.65 kB versus 750 kB); budgets were not changed. Tests inject provider
+and API doubles; a real non-admin Google sign-in redirect remains manual.
 
 Popup recovery: Firebase SDK 12.19.0's installed close polling intentionally
 allows an eight-second auth-event grace. If a browser fails to report closure,

@@ -1,13 +1,60 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  parseCursor, parseProductInput, parseProductRecord, parseSupplierInput, parseSupplierRecord,
+  parseCursor, parseProductInput, parseProductRecord, parsePublishedProduct, parseSupplierInput, parseSupplierRecord,
 } from '../src/admin-catalog.js';
 import { ApiError } from '../src/errors.js';
+import { parseSupplierQuery, supplierPrefixEnd } from '../src/admin-catalog.js';
+import { parsePublishedProductQuery } from '../src/admin-catalog.js';
+
+test('public catalog query allowlists category and bounded limit while retaining the legacy default cursor', () => {
+  assert.deepEqual(parsePublishedProductQuery({}), { cursor: null, filters: {} });
+  assert.deepEqual(parsePublishedProductQuery({ limit: '10', category: 'Inverters', cursor: 'opaque_cursor' }),
+    { cursor: 'opaque_cursor', filters: { category: 'Inverters', limit: 10 } });
+  assert.deepEqual(parsePublishedProductQuery({ limit: '50' }), { cursor: null, filters: { limit: 50 } });
+  assert.deepEqual(parsePublishedProductQuery({ category: 'ATS', limit: '10' }),
+    { cursor: null, filters: { category: 'ATS', limit: 10 } });
+  for (const category of ['PV Isolator', 'MCCB']) {
+    assert.deepEqual(parsePublishedProductQuery({ category }), { cursor: null, filters: { category } });
+    assert.equal(parseProductInput(productInput({ category })).category, category);
+  }
+  for (const query of [{ protectionType: 'ATS' }, { category: 'Panels', protectionType: 'ATS' },
+    { category: 'Protection' }, { category: 'Protection', protectionType: ['ATS'] }])
+    assert.throws(() => parsePublishedProductQuery(query), { code: 'INVALID_CATALOG_INPUT' });
+  assert.throws(() => parsePublishedProductQuery({ cursor: 'bad' }), { code: 'INVALID_CATALOG_INPUT' });
+  for (const query of [{ category: 'Other' }, { category: ['Panels'] }, { limit: 0 }, { limit: 51 }, { limit: '1.5' },
+    { limit: '01x' }, { offset: 10 }, { cursor: 'invalid' }, { category: 'Panels', cursor: 'bad cursor' }])
+    assert.throws(() => parsePublishedProductQuery(query), { code: 'INVALID_CATALOG_INPUT' });
+});
+
+test('supplier filters preserve UUID compatibility and validate bounded opaque paging', () => {
+  assert.deepEqual(parseSupplierQuery({}), { cursor: null, filters: {} });
+  assert.equal(parseSupplierQuery({ cursor: '22222222-2222-4222-8222-222222222222' }).cursor, '22222222-2222-4222-8222-222222222222');
+  assert.deepEqual(parseSupplierQuery({ namePrefix: ' Solar 🌞 ', status: 'inactive', cursor: 'opaque-1' }),
+    { cursor: 'opaque-1', filters: { namePrefix: 'Solar 🌞', status: 'inactive' } });
+  for (const value of [{ status: 'deleted' }, { status: ['active'] }, { namePrefix: '' }, { namePrefix: '\ud800' },
+    { namePrefix: 'x'.repeat(161) }, { namePrefix: 'x\n' }, { search: 'x' }, { cursor: 'opaque' }, { status: 'active', cursor: '../escape' }])
+    assert.throws(() => parseSupplierQuery(value), { code: 'INVALID_CATALOG_INPUT' });
+  assert.equal(supplierPrefixEnd('Solar 🌞'), 'Solar 🌟');
+  assert.equal(supplierPrefixEnd('A\u{10ffff}'), 'B');
+  assert.equal(supplierPrefixEnd('\ud7ff'), '\ue000');
+  assert.equal(supplierPrefixEnd('\u{10ffff}'), null);
+});
 
 const requestId = '11111111-1111-4111-8111-111111111111';
 const supplierId = '22222222-2222-4222-8222-222222222222';
 const at = '2026-10-07T00:00:00.000Z';
+
+test('PV Isolator and MCCB are accepted as independent catalog categories on writes and reads', () => {
+  for (const category of ['PV Isolator', 'MCCB'] as const) {
+    const input = parseProductInput(productInput({ category }));
+    assert.equal(input.category, category);
+    assert.equal(parseProductRecord(productRecord({ category }), requestId).category, category);
+    assert.equal(parsePublishedProduct({ id: requestId, schemaVersion: 1, version: 1, publishedAt: at,
+      sku: 'PANEL-01', name: 'Panel', brand: 'Solar', category, unitCode: 'unit', description: 'Test product',
+      amountMinor: 0, currency: 'PHP' }, requestId).category, category);
+  }
+});
 
 function supplierInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {

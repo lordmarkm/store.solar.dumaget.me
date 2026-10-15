@@ -1,36 +1,47 @@
 <div>
   <header class="mb-6 flex flex-wrap items-end justify-between gap-4">
     <div><p class="eyebrow mb-2">Plan your installations</p><h1 class="page-title">My projects</h1></div>
-    @if (projects().length > 0) {
-      <button type="button" class="kt-btn kt-btn-primary" (click)="newProject()"><i class="ki-outline ki-clipboard" aria-hidden="true"></i>New project</button>
-    }
+    <button type="button" class="kt-btn kt-btn-primary" (click)="newProject()"><i class="ki-outline ki-plus" aria-hidden="true"></i>New project</button>
   </header>
 
-  <p class="mb-5 rounded-sm border border-border bg-muted/50 px-4 py-3 text-sm text-secondary-foreground">{{ service.accountBacked() ? 'Projects and BOMs are saved to your signed-in account. Local previews are preserved separately and are not imported.' : 'Preview only: projects are stored in this browser and are not synced to an account.' }}</p>
-  @if (error()) { <div class="mb-5 border border-border bg-card px-4 py-3 text-sm text-foreground" role="alert">{{ error() }}</div> }
+  <p class="mb-5 rounded-sm border border-border bg-muted/50 px-4 py-3 text-sm text-secondary-foreground">{{ previewMode() ? 'Preview only: projects and filters are stored in this browser. Search and paging apply only to this local preview.' : 'Projects and BOMs are saved to your signed-in account. This list is queried from your account; local previews remain separate.' }}</p>
+  @if (error()) { <div class="mb-5 border border-border bg-card px-4 py-3 text-sm text-foreground" role="alert"><p>{{ error() }}</p><button type="button" class="kt-btn kt-btn-light mt-3" [disabled]="listLoading()" (click)="retry()"><i class="ki-outline ki-arrows-circle" aria-hidden="true"></i>Retry</button></div> }
 
-  @if (service.loading()) { <p class="kt-card mb-5 p-4 text-sm" role="status">Loading account projects…</p> }
-  @if (service.accountBacked()) { <div class="mb-5 flex flex-wrap gap-3"><button type="button" class="kt-btn kt-btn-light" [disabled]="service.loading() || busy()" (click)="refresh()">Refresh / retry projects</button>@if (service.nextCursor()) { <button type="button" class="kt-btn kt-btn-light" [disabled]="service.loading() || busy()" (click)="loadMore()">Load more projects</button> }</div><p class="mb-4 text-xs text-muted-foreground">Search applies to loaded projects only.</p> }
+  @if (!previewMode() && listLoading() && !projects().length) { <p class="kt-card mb-5 p-4 text-sm" role="status">Loading projects…</p> }
+  @if (searchPending()) { <p class="kt-card mb-5 p-4 text-sm" role="status">Searching projects…</p> }
   @if (access.pending()?.kind === 'product' || access.pending()?.kind === 'guest-list') { <section class="kt-card mb-5 p-4"><p class="text-sm">Your retained request has not been applied. Review its items and destination before saving.</p><button type="button" class="kt-btn kt-btn-light mt-3" (click)="reviewPending()">Review retained request</button></section> }
-  @if (!service.loading() && !error() && projects().length === 0) {
-    <section class="kt-card p-8 text-center sm:p-12" aria-labelledby="projects-empty-title">
-      <h2 id="projects-empty-title" class="text-xl font-semibold">Start with your first project</h2>
-      <p class="mx-auto mt-2 max-w-lg text-sm leading-6 text-secondary-foreground">Keep installation details together and build its equipment list when you’re ready.</p>
-      <button type="button" class="kt-btn kt-btn-primary mx-auto mt-5" (click)="newProject()"><i class="ki-outline ki-clipboard" aria-hidden="true"></i>New project</button>
-    </section>
-  } @else if (projects().length > 0) {
-    <section aria-labelledby="project-list-title">
-      <div class="mb-4 flex flex-wrap items-end justify-between gap-3"><h2 id="project-list-title" class="text-lg font-semibold">Your projects</h2><span class="text-xs text-secondary-foreground">{{ filteredProjects().length }} of {{ projects().length }} projects</span></div>
-      <div class="kt-card mb-5 p-4">
-        <label for="project-search" class="mb-2 block text-xs font-medium">Search projects</label>
-        <input id="project-search" type="search" class="kt-input w-full" placeholder="Name, location, or category…" [ngModel]="search()" (ngModelChange)="search.set($event)" />
+  <section aria-labelledby="project-list-title">
+    <div class="mb-4 flex flex-wrap items-end justify-between gap-3"><h2 id="project-list-title" class="text-lg font-semibold">Your projects</h2><div class="flex flex-wrap items-center gap-3"><span class="text-xs text-secondary-foreground">Page {{ pageNumber() }} · {{ projects().length }} on this page</span><button type="button" class="kt-btn kt-btn-sm kt-btn-light" [disabled]="listLoading() || busy()" (click)="refresh()"><i class="ki-outline ki-arrows-circle" aria-hidden="true"></i>Refresh projects</button></div></div>
+    <div class="kt-card mb-5 p-4">
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="min-w-56 flex-1 basis-64"><label for="project-filter-search" class="mb-2 block text-xs font-medium">Search name or location</label><input id="project-filter-search" type="search" maxlength="120" class="kt-input w-full" placeholder="Enter a project name or location" [ngModel]="search()" (ngModelChange)="setSearch($event)" /></div>
+        <div class="min-w-40 flex-1 basis-40"><label for="project-filter-status" class="mb-2 block text-xs font-medium">Status</label><select id="project-filter-status" class="kt-select w-full" [ngModel]="status()" (ngModelChange)="setStatus($event)"><option value="">All statuses</option><option value="draft">Draft</option><option value="archived">Archived</option></select></div>
+        <div class="min-w-48 flex-1 basis-48"><label for="project-filter-classification" class="mb-2 block text-xs font-medium">Classification</label><select id="project-filter-classification" class="kt-select w-full" [ngModel]="classificationFilter()" (ngModelChange)="setClassification($event)"><option value="">All classifications</option>@for (value of projectClassifications; track value) { <option [value]="value">{{ PROJECT_LABELS[value] }}</option> }</select></div>
+        <div class="min-w-44 flex-1 basis-44"><label for="project-filter-configuration" class="mb-2 block text-xs font-medium">Configuration</label><select id="project-filter-configuration" class="kt-select w-full" [ngModel]="configurationFilter()" (ngModelChange)="setConfiguration($event)"><option value="">All configurations</option>@for (value of configurations; track value) { <option [value]="value">{{ CONFIGURATION_LABELS[value] }}</option> }</select></div>
+        <div class="min-w-44 flex-1 basis-44"><label for="project-filter-work-scope" class="mb-2 block text-xs font-medium">Work scope</label><select id="project-filter-work-scope" class="kt-select w-full" [ngModel]="workScopeFilter()" (ngModelChange)="setWorkScope($event)"><option value="">All work scopes</option>@for (value of workScopes; track value) { <option [value]="value">{{ WORK_SCOPE_LABELS[value] }}</option> }</select></div>
+        <app-tooltip label="Clear filters" class="mb-1 shrink-0"><button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" aria-label="Clear filters" title="Clear filters" [disabled]="!hasFilters() || listLoading()" (click)="clearFilters()"><i class="ki-outline ki-cross" aria-hidden="true"></i></button></app-tooltip>
       </div>
+    </div>
+    @if (listLoading() && projects().length) { <p class="mb-4 text-sm text-secondary-foreground" role="status">Loading this project page…</p> }
+    @if (nextCursor() && !listLoading()) { <p class="mb-4 text-xs text-secondary-foreground" role="status">More matching projects may be available in the next search segment.</p> }
+    @if ((!listLoading() || previewMode()) && !error() && !searchPending() && projects().length === 0) {
+      @if (nextCursor()) {
+        <section class="kt-card p-8 text-center"><h2 class="text-lg font-semibold">No matches in this segment</h2><p class="mt-2 text-sm text-secondary-foreground">The bounded search continues. Move to the next segment to keep looking.</p><button type="button" class="kt-btn kt-btn-light mx-auto mt-4" (click)="nextPage()">Next segment</button></section>
+      } @else if (pageNumber() > 1) {
+        <section class="kt-card p-8 text-center"><h2 class="text-lg font-semibold">No projects on this page</h2><p class="mt-2 text-sm text-secondary-foreground">Earlier pages may contain matching projects. Go back to review them.</p></section>
+      } @else if (hasFilters()) {
+        <section class="kt-card p-8 text-center"><h2 class="text-lg font-semibold">No matching projects</h2><p class="mt-2 text-sm text-secondary-foreground">No projects matched this search and filter combination.</p><button type="button" class="kt-btn kt-btn-light mx-auto mt-4" (click)="clearFilters()">Clear filters</button></section>
+      } @else {
+        <section class="kt-card p-8 text-center sm:p-12" aria-labelledby="projects-empty-title"><h2 id="projects-empty-title" class="text-xl font-semibold">Start with your first project</h2><p class="mx-auto mt-2 max-w-lg text-sm leading-6 text-secondary-foreground">Keep installation details together and build its equipment list when you’re ready.</p></section>
+      }
+    }
+    @if (projects().length > 0) {
       <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-        @for (project of filteredProjects(); track project.id) {
+        @for (project of projects(); track project.id) {
           <article class="kt-card flex min-w-0 flex-col p-5">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="min-w-0"><h3 class="break-words text-base font-semibold leading-6">{{ project.name }}</h3>@if (project.location) { <p class="mt-1 break-words text-sm text-secondary-foreground">{{ project.location }}</p> }</div>
-              @if (activeProject()?.id === project.id) { <span class="kt-badge kt-badge-success shrink-0">Active project</span> }
+              @if (activeProjectId() === project.id) { <span class="kt-badge kt-badge-success shrink-0">Active project</span> }
             </div>
             <div class="mt-4 flex flex-wrap gap-2">
               <span class="public-panel max-w-full break-words bg-muted px-2 py-1 text-xs">{{ classification(project) }}</span>
@@ -44,15 +55,19 @@
             </dl>
             <div class="mt-auto flex flex-wrap gap-3 pt-5">
               <a [routerLink]="['/my/projects', project.id]" class="kt-btn kt-btn-sm kt-btn-primary"><i class="ki-outline ki-eye" aria-hidden="true"></i>View details</a>
-              @if (activeProject()?.id !== project.id && project.status === 'draft') { <button type="button" class="kt-btn kt-btn-sm kt-btn-light" [disabled]="busy() || service.loading()" (click)="setActive(project.id)"><i class="ki-outline ki-check" aria-hidden="true"></i>Make active</button> }
-              @else if (activeProject()?.id === project.id) { <button type="button" class="kt-btn kt-btn-sm kt-btn-light" [disabled]="busy() || service.loading()" (click)="setActive(null)"><i class="ki-outline ki-cross" aria-hidden="true"></i>Clear active</button> }
+              @if (activeProjectId() !== project.id && project.status === 'draft') { <button type="button" class="kt-btn kt-btn-sm kt-btn-light" [disabled]="busy() || listLoading() || service.loading()" (click)="setActive(project.id)"><i class="ki-outline ki-check" aria-hidden="true"></i>Make active</button> }
+              @else if (activeProjectId() === project.id) { <button type="button" class="kt-btn kt-btn-sm kt-btn-light" [disabled]="busy() || listLoading() || service.loading()" (click)="setActive(null)"><i class="ki-outline ki-cross" aria-hidden="true"></i>Clear active</button> }
             </div>
           </article>
-        } @empty {
-          <div class="kt-card col-span-full p-8 text-center"><h3 class="text-base font-semibold">No matching projects</h3><p class="mt-2 text-sm text-secondary-foreground">Try another project name, location, or category.</p><button type="button" class="kt-btn kt-btn-light mx-auto mt-4" (click)="search.set('')">Clear search</button></div>
         }
       </div>
-      @if (!activeProject()) { <p class="mt-5 text-sm text-secondary-foreground" role="status">No active project selected. Choose Make active on a project when you want to set one.</p> }
-    </section>
-  }
+    }
+    @if (projects().length > 0 && activeProjectId() === null) { <p class="mt-5 text-sm text-secondary-foreground" role="status">No active project selected. Choose Make active on a project when you want to set one.</p> }
+    @if (projects().length > 0 || nextCursor() || cursorStack().length > 1) {
+      <nav aria-label="Project pages" class="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <span class="text-xs text-secondary-foreground">Page {{ pageNumber() }} · 10 projects per page</span>
+        <div class="flex flex-wrap gap-3"><button type="button" class="kt-btn kt-btn-light" [disabled]="cursorStack().length <= 1 || listLoading() || busy()" (click)="previousPage()">Previous</button><button type="button" class="kt-btn kt-btn-light" [disabled]="!nextCursor() || listLoading() || busy()" (click)="nextPage()">Next</button></div>
+      </nav>
+    }
+  </section>
 </div>

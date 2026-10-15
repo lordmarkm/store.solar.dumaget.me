@@ -2,12 +2,14 @@ import { Component, DestroyRef, inject, input, output, signal } from '@angular/c
 import type { ProductImage } from '../core/product-images';
 import { AuthSessionService } from '../core/auth-session.service';
 import { AdminCatalogApiService } from '../core/admin-catalog-api.service';
+import { ProductLightboxDirective } from './product-lightbox';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 @Component({
   selector: 'app-product-image-uploader',
+  imports: [ProductLightboxDirective],
   host: { class: 'block' },
   template: `
     <section class="space-y-4" aria-label="Product images">
@@ -15,13 +17,15 @@ const SUPPORTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
         <div><h3 class="text-sm font-semibold">Product images</h3><p class="mt-1 text-xs text-secondary-foreground">Up to 6 images. JPEG, PNG, or WebP, up to 5 MiB each.</p></div>
         <span class="text-xs text-secondary-foreground">{{ images().length }} of 6 added</span>
       </div>
-      <p class="border-s-4 border-primary bg-muted p-3 text-sm leading-5" role="note"><strong>Public image notice:</strong> Uploaded pictures become public immediately, including drafts. Removing a saved picture takes effect after Save; its stored files are deleted only when no product, published listing, or historical hold uses them. Unused uploads have a 24-hour cleanup grace period. Cached public copies may remain accessible.</p>
       @if (images().length) {
         <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3" aria-label="Uploaded product images">
           @for (image of images(); track image.id; let index = $index) {
             <li class="kt-card min-w-0 overflow-hidden p-2">
-              <div class="relative"><img class="product-image-preview h-32 w-full object-contain" [src]="image.thumbnailUrl" [alt]="productName() + ' image ' + (index + 1)" />
-                @if (index === 0) { <span class="absolute start-1 top-1 border border-primary bg-card px-2 py-1 text-[10px] font-semibold text-foreground">Primary</span> }
+              <div class="relative"><button type="button" class="solar-product-image-trigger h-32 w-full" [productLightbox]="images()" [lightboxIndex]="index" [lightboxLabel]="productName()"
+                  [attr.aria-label]="'Enlarge image ' + (index + 1) + ' for ' + productName()" [attr.title]="'Enlarge image ' + (index + 1) + ' for ' + productName()">
+                  <img class="product-image-preview h-32 w-full object-contain" [src]="image.thumbnailUrl" [alt]="productName() + ' image ' + (index + 1)" />
+                </button>
+                @if (index === 0) { <span class="pointer-events-none absolute start-1 top-1 border border-primary bg-card px-2 py-1 text-[10px] font-semibold text-foreground">Primary</span> }
               </div>
               <div class="mt-2 flex items-center justify-between gap-2">
                 <span class="truncate text-xs text-secondary-foreground">{{ image.width }} × {{ image.height }}</span>

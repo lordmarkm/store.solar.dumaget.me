@@ -102,10 +102,14 @@ export class ProductImageLifecycle {
     for (const variant of ['thumb', 'detail']) {
       const file = this.bucket().file('products/' + id + '/' + variant + '.webp');
       try {
+        if (!await this.ownsClaim(id, claim)) return;
         const [metadata] = await file.getMetadata();
         if (metadata.contentType !== 'image/webp' || metadata.metadata?.['pipelineVersion'] !== '1'
           || metadata.metadata?.['width'] !== String(image.width) || metadata.metadata?.['height'] !== String(image.height)
           || !metadata.generation || !/^\d+$/.test(String(metadata.generation))) throw new Error('unsafe-object');
+        // Recheck AFTER metadata: an expired worker must never observe a later
+        // reupload's generation and delete it under a superseded cleanup claim.
+        if (!await this.ownsClaim(id, claim)) return;
         await file.delete({ ifGenerationMatch: metadata.generation });
       } catch (error) {
         if (!(typeof error === 'object' && error !== null && 'code' in error && Number(error.code) === 404)) throw error;
@@ -117,5 +121,11 @@ export class ProductImageLifecycle {
       if (data!['state'] !== 'deleting' || data!['claim'] !== claim) return;
       tx.set(ref, { image, state: 'deleted', retained: false, touch: data!['touch'] + 1, leaseUntil: 0 });
     }, { maxAttempts: 3 });
+  }
+  private async ownsClaim(id: string, claim: string): Promise<boolean> {
+    const saved = await this.database().collection('productImageAssets').doc(id).get();
+    const data = saved.data();
+    this.validateAsset(data, id);
+    return data!['state'] === 'deleting' && data!['claim'] === claim;
   }
 }

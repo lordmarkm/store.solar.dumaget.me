@@ -36,6 +36,14 @@ import { PANEL_SPECIFICATION_FIELDS } from '../core/panel-specifications';
         <dl class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
           <div><dt class="text-secondary-foreground">Brand</dt><dd class="mt-1 font-medium">{{ product.brand }}</dd></div>
           @if (product.category !== 'Panels') { <div><dt class="text-secondary-foreground">Specification</dt><dd class="mt-1 font-medium">{{ product.spec }}</dd></div> }
+          @if (product.mcbSpecifications; as mcb) {
+            <div><dt class="text-secondary-foreground">MCB type</dt><dd class="mt-1 font-medium">{{ mcb.type }}</dd></div>
+            <div><dt class="text-secondary-foreground">Amperage</dt><dd class="mt-1 font-medium">{{ mcb.amperage }} A</dd></div>
+          }
+          @if (product.protectionType === 'ATS') {
+            <div><dt class="text-secondary-foreground">Subcategory</dt><dd class="mt-1 font-medium">ATS</dd></div>
+            <div><dt class="text-secondary-foreground">Amperage</dt><dd class="mt-1 font-medium">{{ product.atsSpecifications ? product.atsSpecifications.amperage + ' A' : 'Not specified' }}</dd></div>
+          }
           @if (product.source === 'published') {
             <div><dt class="text-secondary-foreground">Availability</dt><dd class="mt-1 font-medium">Unconfirmed</dd></div>
             <div><dt class="text-secondary-foreground">Tax treatment</dt><dd class="mt-1 font-medium">Not configured</dd></div>

@@ -46,6 +46,25 @@ describe('StoreApiService', () => {
 
   afterEach(() => { TestBed.resetTestingModule(); vi.useRealTimers(); });
 
+  it('restricts project management and encodes only bounded allowlisted list filters', async () => {
+    publish({ customerId: 'customer-a', source: 'firebase' });
+    const api = TestBed.inject(StoreApiService), id = '11111111-1111-4111-8111-111111111111';
+    for (const path of ['/api/v1/me/projects/' + id + '/anything', '/api/v1/me/projects/not-uuid/management']) {
+      await expect(api.projectRequest(path as never, 'POST', {}, value => value)).rejects.toMatchObject({ code: 'invalid-input' });
+    }
+    await expect(api.projectRequest('/api/v1/me/projects', 'GET', undefined, value => value, null, { customerId: 'other' })).rejects.toMatchObject({ code: 'invalid-input' });
+    await expect(api.projectRequest('/api/v1/me/projects', 'GET', undefined, value => value, null, { search: 'x'.repeat(121) })).rejects.toMatchObject({ code: 'invalid-input' });
+    await expect(api.projectRequest(`/api/v1/me/projects/${id}/management`, 'POST', {}, value => value, null, { status: 'draft' })).rejects.toMatchObject({ code: 'invalid-input' });
+    expect(fetcher).not.toHaveBeenCalled();
+    await api.projectRequest('/api/v1/me/projects', 'GET', undefined, value => value, id, { search: 'Cebu & roof', status: 'draft', limit: '10' });
+    const url = new URL(String(fetcher.mock.calls[0]?.[0]), 'http://localhost');
+    expect(url.searchParams.get('search')).toBe('Cebu & roof');
+    expect(url.searchParams.get('cursor')).toBe(id);
+    expect(url.searchParams.get('limit')).toBe('10');
+    await api.projectRequest(`/api/v1/me/projects/${id}/management`, 'POST', { action: 'archive-project' }, value => value);
+    expect(fetcher.mock.calls[1]?.[1]?.method).toBe('POST');
+    expect(fetcher.mock.calls[1]?.[1]?.cache).toBe('no-store');
+  });
   it('restricts admin transport to reviewed endpoints, methods and UUID cursor values', async () => {
     publish({ customerId: 'customer-a', source: 'firebase' });
     const api = TestBed.inject(StoreApiService);
@@ -59,6 +78,77 @@ describe('StoreApiService', () => {
     fetcher.mockResolvedValue(response({ items: [], nextCursor: null }));
     await api.adminRequest('/api/v1/admin/products', 'GET', undefined, value => value, '11111111-1111-4111-8111-111111111111');
     expect(fetcher.mock.calls[0]?.[0]).toBe('/api/v1/admin/products?cursor=11111111-1111-4111-8111-111111111111');
+  });
+  it('allows only fixed inventory routes with bounded list filters and cursors', async () => {
+    publish({ customerId: 'customer-a', source: 'firebase' });
+    const api = TestBed.inject(StoreApiService), id = '11111111-1111-4111-8111-111111111111';
+    for (const [path, method] of [['/api/v1/admin/inventory/locations/../escape', 'PUT'],
+      ['/api/v1/admin/inventory/' + id + '/products/' + id + '/delete', 'POST'],
+      ['/api/v1/admin/inventory/' + id, 'PUT'], ['/api/v1/admin/inventory/locations', 'PUT']]) {
+      await expect(api.adminRequest(path as never, method as never, {}, value => value)).rejects.toMatchObject({ code: 'invalid-input' });
+    }
+    await expect(api.adminRequest('/api/v1/admin/inventory/locations', 'GET', undefined, value => value, 'opaque')).rejects.toMatchObject({ code: 'invalid-input' });
+    expect(fetcher).not.toHaveBeenCalled();
+    fetcher.mockResolvedValue(response({ items: [], nextCursor: null }));
+    await api.adminRequest(`/api/v1/admin/inventory/${id}`, 'GET', undefined, value => value, 'opaque', { skuPrefix: 'SOL-' });
+    expect(fetcher.mock.calls[0]?.[0]).toContain('skuPrefix=SOL-');
+    await expect(api.adminRequest(`/api/v1/admin/inventory/${id}/products/${id}/movements`, 'GET', undefined,
+      value => value, null, { skuPrefix: 'x' })).rejects.toMatchObject({ code: 'invalid-input' });
+  });
+  it('sends the fixed inventory product, count, transfer and settings routes through the guarded transport', async () => {
+    publish({ customerId: 'customer-a', source: 'firebase' });
+    const api = TestBed.inject(StoreApiService), location = '11111111-1111-4111-8111-111111111111';
+    const product = '22222222-2222-4222-8222-222222222222';
+    const routes = [
+      [`/api/v1/admin/inventory/${location}/products/${product}`, 'GET'],
+      [`/api/v1/admin/inventory/${location}/products/${product}/counts`, 'POST'],
+      [`/api/v1/admin/inventory/${location}/products/${product}/transfers`, 'POST'],
+      [`/api/v1/admin/inventory/${location}/products/${product}/settings`, 'PUT'],
+    ] as const;
+    for (const [path, method] of routes) {
+      await api.adminRequest(path, method, method === 'GET' ? undefined : { reviewed: true }, value => value);
+      const [url, init] = fetcher.mock.calls.at(-1) as [string, RequestInit];
+      expect(url).toBe(path);
+      expect(init.method).toBe(method);
+      expect(init.credentials).toBe('omit');
+      expect(init.cache).toBe('no-store');
+    }
+    expect(fetcher).toHaveBeenCalledTimes(routes.length);
+  });
+  it('allows stockStatus only on inventory lists and only for the backend vocabulary', async () => {
+    publish({ customerId: 'customer-a', source: 'firebase' });
+    const api = TestBed.inject(StoreApiService), location = '11111111-1111-4111-8111-111111111111';
+    for (const status of ['unknown', 'zero', 'low', 'in-stock']) {
+      await api.adminRequest(`/api/v1/admin/inventory/${location}`, 'GET', undefined, value => value, null, { stockStatus: status });
+      const [url] = fetcher.mock.calls.at(-1) as [string];
+      expect(new URL(url, 'http://localhost').searchParams.get('stockStatus')).toBe(status);
+    }
+    for (const [path, value] of [
+      [`/api/v1/admin/inventory/${location}`, 'available'],
+      ['/api/v1/admin/products', 'low'],
+      [`/api/v1/admin/inventory/${location}/products/22222222-2222-4222-8222-222222222222/movements`, 'low'],
+    ]) {
+      await expect(api.adminRequest(path as never, 'GET', undefined, value => value, null, { stockStatus: value }))
+        .rejects.toMatchObject({ code: 'invalid-input' });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+  it('rejects wrong methods and malformed UUIDs for inventory product routes before transport', async () => {
+    publish({ customerId: 'customer-a', source: 'firebase' });
+    const api = TestBed.inject(StoreApiService), location = '11111111-1111-4111-8111-111111111111';
+    const product = '22222222-2222-4222-8222-222222222222';
+    for (const [path, method] of [
+      [`/api/v1/admin/inventory/${location}/products/${product}`, 'POST'],
+      [`/api/v1/admin/inventory/${location}/products/${product}/counts`, 'GET'],
+      [`/api/v1/admin/inventory/${location}/products/${product}/transfers`, 'PUT'],
+      [`/api/v1/admin/inventory/${location}/products/${product}/settings`, 'POST'],
+      ['/api/v1/admin/inventory/not-a-uuid/products/' + product, 'GET'],
+      [`/api/v1/admin/inventory/${location}/products/not-a-uuid/counts`, 'POST'],
+    ]) {
+      await expect(api.adminRequest(path as never, method as never, {}, value => value))
+        .rejects.toMatchObject({ code: 'invalid-input' });
+    }
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('uses only the fixed relative API and sends a fresh bearer token with private caching and credentials disabled', async () => {

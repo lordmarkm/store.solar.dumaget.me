@@ -25,6 +25,25 @@ describe('catalog destinations and mixed project BOM UI',()=>{
   afterEach(()=>{TestBed.inject(Dialog).closeAll();vi.unstubAllGlobals();});
   const settle=async(harness:RouterTestingHarness)=>{harness.fixture.detectChanges();await harness.fixture.whenStable();};
   const bomPage=(harness:RouterTestingHarness)=>harness.routeDebugElement!.query(node=>node.componentInstance instanceof ProjectBomPage)!.componentInstance as ProjectBomPage;
+  it('renders the repeat Add button after the last component line without adding a BOM item', async () => {
+    const service = TestBed.inject(ProjectService);
+    const inverter = PRODUCTS.find(product => product.category === 'Inverters')!;
+    service.create(input(), 'one', pendingProduct(inverter));
+    service.saveFreeText('preview-one', { ...text(), title: 'Owner inverter', componentCategory: 'Inverters' }, 'second');
+    const harness = await RouterTestingHarness.create('/my/projects/preview-one/bom');
+    await settle(harness);
+    const page = bomPage(harness);
+    const root = harness.routeNativeElement!;
+    const footer = root.querySelector<HTMLButtonElement>('[data-component-add-footer]')!;
+    expect(footer.textContent).toContain('Add another inverter');
+    expect(footer.closest('tr')!.previousElementSibling?.querySelector('[data-line-id]')?.textContent).toContain('Owner inverter');
+    expect(root.querySelectorAll('[data-component-add-footer]')).toHaveLength(1);
+    expect([...root.querySelectorAll('button')].filter(button => button.textContent?.includes('Add another inverter'))).toHaveLength(1);
+    expect(page.rows()).toHaveLength(2);
+    expect(page.selected()).toHaveLength(2);
+    expect(service.projects()[0].bom.items).toHaveLength(2);
+    expect(root.querySelector('[data-empty-component]')?.textContent).toBe('No items selected');
+  });
   it('cancels chooser/wizard without writes and opens one dialog with the shared wizard',async()=>{
     const harness=await RouterTestingHarness.create('/catalog');
     const button=harness.routeNativeElement!.querySelector<HTMLButtonElement>('[aria-label="Add 620W N-Type Bifacial Solar Panel to project"]')!;
@@ -80,7 +99,7 @@ describe('catalog destinations and mixed project BOM UI',()=>{
     const envelope=JSON.parse(localStorage.getItem(LOCAL_PROJECTS_KEY)!);envelope.projects[0].bom.items[0].product.productId='removed-catalog-item';localStorage.setItem(LOCAL_PROJECTS_KEY,JSON.stringify(envelope));
     TestBed.resetTestingModule();TestBed.configureTestingModule({providers:[provideRouter(routes), { provide: CUSTOMER_SESSION, useValue: signal({ customerId: 'local-preview' }) }]});
     const harness=await RouterTestingHarness.create('/my/projects/preview-one/bom');const page=bomPage(harness);
-    expect(page.rows()).toHaveLength(1);expect(page.rows()[0].item.quantity).toBe(200);expect(page.rows()[0].total).toBeNull();expect(page.selected()).toHaveLength(1);expect(harness.routeNativeElement!.textContent).toContain('Unavailable product');expect(page.selectedCsv()).toContain('removed-catalog-item');
+    expect(page.rows()).toHaveLength(1);expect(page.rows()[0].item.quantity).toBe(200);expect(page.rows()[0].total).toBeNull();expect(page.selected()).toHaveLength(1);expect(harness.routeNativeElement!.textContent).toContain('Unavailable product');expect(page.selectedCsv()).toContain('Unavailable product');expect(page.selectedCsv()).not.toContain('removed-catalog-item');
   });
   it('initializes all rows checked, preserves deselection through an editor and exports selected lines only',async()=>{
     const service=TestBed.inject(ProjectService);service.create(input(),'one',pendingProduct(PRODUCTS[0]));service.saveFreeText('preview-one',text(),'text');
@@ -109,9 +128,21 @@ describe('catalog destinations and mixed project BOM UI',()=>{
   });
   it('confirms removal, supports undo, and keeps a cancelled confirmation unchanged',async()=>{
     const service=TestBed.inject(ProjectService);service.create(input(),'one',pendingProduct(PRODUCTS[0]));const harness=await RouterTestingHarness.create('/my/projects/preview-one/bom');const page=bomPage(harness);const item=page.rows()[0].item;
-    page.remove(item);expect(page.rows()).toHaveLength(1);
-    page.removing.set(item.id);page.removing.set(null);expect(page.rows()).toHaveLength(1);
-    page.removing.set(item.id);await page.remove(item);expect(page.rows()).toHaveLength(0);expect(page.undoAvailable()).toBe(true);await page.undo();expect(page.rows()).toHaveLength(1);expect(page.rows()[0].item.id).toBe(item.id);
+    const cancelled=page.remove(item);expect(page.rows()).toHaveLength(1);
+    await vi.waitFor(()=>{TestBed.tick();expect(document.querySelector<HTMLButtonElement>('app-ktui-confirmation footer button:last-child')?.disabled).toBe(false);});
+    expect(harness.routeNativeElement!.textContent).not.toContain('Confirm removal');
+    document.querySelector<HTMLButtonElement>('app-ktui-confirmation footer button:last-child')!.click();await cancelled;expect(page.rows()).toHaveLength(1);
+    const confirmed=page.remove(item);
+    await vi.waitFor(()=>{TestBed.tick();expect(document.querySelector<HTMLButtonElement>('app-ktui-confirmation footer button')?.disabled).toBe(false);});
+    document.querySelector<HTMLButtonElement>('app-ktui-confirmation footer button')!.click();await confirmed;expect(page.rows()).toHaveLength(0);expect(page.undoAvailable()).toBe(true);await page.undo();expect(page.rows()).toHaveLength(1);expect(page.rows()[0].item.id).toBe(item.id);
     page.editor();await settle(harness);await harness.navigateByUrl('/catalog');expect(TestBed.inject(Dialog).openDialogs).toHaveLength(0);
+  });
+  it('cancels an open native confirmation on route change without removing a line',async()=>{
+    const service=TestBed.inject(ProjectService);service.create(input(),'one',pendingProduct(PRODUCTS[0]));const harness=await RouterTestingHarness.create('/my/projects/preview-one/bom');const page=bomPage(harness);const item=page.rows()[0].item;
+    const removal=page.remove(item);
+    await harness.navigateByUrl('/catalog');await removal;
+    expect(service.projects()[0].bom.items).toHaveLength(1);
+    expect(document.querySelector('app-ktui-confirmation')).toBeNull();
+    expect(document.body.style.overflow).toBe('');
   });
 });

@@ -24,7 +24,7 @@
               <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
-                    <h3 class="break-all font-semibold">Cart {{ list.id }}</h3>
+                    <h3 class="font-semibold">Cart</h3>
                     @if (list.id === history.currentListId) { <span class="kt-badge kt-badge-sm bg-primary text-primary-foreground">Current</span> }
                   </div>
                   <dl class="mt-3 grid gap-x-5 gap-y-2 text-sm sm:grid-cols-2">
@@ -50,12 +50,12 @@
       @if (service.currentGuestList(); as current) {
         <div class="public-panel min-w-0 border border-border bg-muted/40 p-4">
           <h3 class="font-semibold">Current cart will be retained</h3>
-          <p class="mt-2 break-all text-sm">Cart {{ current.id }}</p>
+          <p class="mt-2 text-sm">Current cart</p>
           <p class="mt-1 text-sm text-secondary-foreground">{{ current.items.length }} {{ current.items.length === 1 ? 'line' : 'lines' }} · {{ current.state === 'linked' ? linkedProjectName(current) : 'Unlinked' }}</p>
         </div>
       }
-      <p class="text-sm leading-6">The new cart will have its own ID, start empty, and remain unlinked. Your current cart contents and project link are retained.</p>
-      <button type="button" class="kt-btn kt-btn-primary" [disabled]="saving()" (click)="startNew()">Start new cart<i class="ki-outline ki-check" aria-hidden="true"></i></button>
+      <p class="text-sm leading-6">The new cart will start empty and remain unlinked. Your current cart contents and project link are retained.</p>
+      <button type="button" class="kt-btn kt-btn-primary" [disabled]="saving()" (click)="startNew()">Start new cart<i class="ki-outline ki-plus" aria-hidden="true"></i></button>
     }
   </div>
 

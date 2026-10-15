@@ -10,6 +10,8 @@ import type {
 import { imageDescriptor } from '../src/product-images.js';
 import type { ProductImageStore } from '../src/product-images.js';
 import { ApiError } from '../src/errors.js';
+import type { SupplierListFilters } from '../src/admin-catalog.js';
+import type { PublishedProductListQuery } from '../src/admin-catalog.js';
 
 const enabled = loadConfig({
   NODE_ENV: 'test', FIREBASE_BACKEND_ENABLED: 'true', FIREBASE_AUTH_SETUP_APPROVED: 'true',
@@ -61,15 +63,18 @@ function trackedCatalog() {
   const owners: VerifiedIdentity[] = [];
   const productQueries: Array<{ cursor: string | null; filters: ProductListFilters | undefined }> = [];
   const brandCursors: Array<string | null> = [];
+  const supplierQueries: Array<{ cursor: string | null; filters: SupplierListFilters | undefined }> = [];
+  const publicQueries: Array<{ cursor: string | null; filters: PublishedProductListQuery | undefined }> = [];
   const catalog: AdminCatalogRepository = {
     async product() { calls.push('get-product'); return makeProduct(productPayload); },
     async updateProduct(owner, inputId, input) { calls.push('update-product'); owners.push(owner); return { ...makeProduct(input), id: inputId, version: 2 }; },
     async publishProduct(owner) { calls.push('publish-product'); owners.push(owner); return { ...makeProduct(productPayload), version: 2, state: 'published', publishedVersion: 2 }; },
     async unpublishProduct(owner) { calls.push('unpublish-product'); owners.push(owner); return { ...makeProduct(productPayload), version: 3 }; },
-    async publishedProducts() { calls.push('public-list'); return { items: [], nextCursor: null }; },
+    async publishedProducts(cursor, filters) { calls.push('public-list'); publicQueries.push({ cursor, filters }); return { items: [], nextCursor: null }; },
     async publishedProduct() { calls.push('public-product'); throw new ApiError(404, 'PRODUCT_NOT_FOUND', 'Product not found.'); },
     async publishedReferences() { calls.push('public-references'); return []; },
-    async suppliers(_cursor): Promise<AdminPage<AdminSupplier>> {
+    async suppliers(cursor, filters): Promise<AdminPage<AdminSupplier>> {
+      supplierQueries.push({ cursor, filters });
       calls.push('list-suppliers');
       return { items: [makeSupplier(supplierPayload)], nextCursor: null };
     },
@@ -102,8 +107,27 @@ function trackedCatalog() {
       calls.push('create-product'); owners.push(owner); return makeProduct(input);
     },
   };
-  return { catalog, calls, owners, productQueries, brandCursors };
+  return { catalog, calls, owners, productQueries, brandCursors, supplierQueries, publicQueries };
 }
+
+test('supplier API forwards combined filters and authorizes before query validation', async () => {
+  const tracked = trackedCatalog();
+  const app = buildApp(enabled, { logger: false, catalog: tracked.catalog,
+    verifier: trackedVerifier(async token => token === 'not-admin' ? { ...adminIdentity, storeAdmin: false } : adminIdentity).verifier });
+  try {
+    const url = '/api/v1/admin/suppliers?namePrefix=Solar%20%26%20%F0%9F%8C%9E&status=inactive&cursor=next_01';
+    assert.equal((await app.inject({ method: 'GET', url, headers: authorization })).statusCode, 200);
+    assert.deepEqual(tracked.supplierQueries, [{ cursor: 'next_01', filters: { namePrefix: 'Solar & 🌞', status: 'inactive' } }]);
+    for (const query of ['status=deleted', 'status=active&status=inactive', 'namePrefix=', 'namePrefix=x&namePrefix=y',
+      'search=solar', 'cursor=opaque_without_filters', 'namePrefix=' + 'x'.repeat(161), 'status=active&cursor=../escape']) {
+      const invalidUrl = '/api/v1/admin/suppliers?' + query;
+      assert.equal((await app.inject({ method: 'GET', url: invalidUrl, headers: authorization })).statusCode, 400);
+      assert.equal((await app.inject({ method: 'GET', url: invalidUrl })).statusCode, 401);
+      assert.equal((await app.inject({ method: 'GET', url: invalidUrl, headers: { authorization: 'Bearer not-admin' } })).statusCode, 403);
+    }
+    assert.equal(tracked.supplierQueries.length, 1);
+  } finally { await app.close(); }
+});
 
 function trackedVerifier(resolve: (token: string) => Promise<VerifiedIdentity> = async () => adminIdentity) {
   const calls: string[] = [];
@@ -205,16 +229,33 @@ test('public catalog needs no token and never opens private masters; disabled pu
     const list = await app.inject({ method: 'GET', url: '/api/v1/catalog/products' });
     assert.equal(list.statusCode, 200);
     assert.deepEqual(list.json(), { items: [], nextCursor: null });
+    const filtered = await app.inject({ method: 'GET', url: '/api/v1/catalog/products?category=Batteries&limit=10&cursor=opaque_cursor' });
+    assert.equal(filtered.statusCode, 200);
+    const ats = await app.inject({ method: 'GET', url: '/api/v1/catalog/products?category=ATS&limit=10&cursor=ats_cursor' });
+    assert.equal(ats.statusCode, 200);
+    for (const category of ['PV Isolator', 'MCCB']) {
+      const response = await app.inject({ method: 'GET', url: `/api/v1/catalog/products?category=${encodeURIComponent(category)}` });
+      assert.equal(response.statusCode, 200);
+    }
+    assert.deepEqual(tracked.publicQueries, [
+      { cursor: null, filters: {} }, { cursor: 'opaque_cursor', filters: { category: 'Batteries', limit: 10 } },
+      { cursor: 'ats_cursor', filters: { category: 'ATS', limit: 10 } },
+      { cursor: null, filters: { category: 'PV Isolator' } }, { cursor: null, filters: { category: 'MCCB' } },
+    ]);
     const missing = await app.inject({ method: 'GET', url: `/api/v1/catalog/products/${requestId}` });
     assert.equal(missing.statusCode, 404);
     assert.deepEqual(auth.calls, []);
-    assert.deepEqual(tracked.calls, ['public-list', 'public-product']);
+    assert.deepEqual(tracked.calls, ['public-list', 'public-list', 'public-list', 'public-list', 'public-list', 'public-product']);
     assert.equal((await app.inject({ method: 'POST', url: '/api/v1/catalog/references', payload: { ids: [requestId] } })).statusCode, 200);
     assert.deepEqual(auth.calls, []);
     for (const payload of [{ ids: [] }, { ids: Array(21).fill(requestId) }, { ids: [requestId, requestId] }, { ids: ['bad'] }, { ids: [requestId], private: true }]) {
       assert.equal((await app.inject({ method: 'POST', url: '/api/v1/catalog/references', payload })).statusCode, 400);
     }
-    for (const url of ['/api/v1/catalog/products?state=draft', '/api/v1/catalog/products?cursor=bad', '/api/v1/catalog/products/bad']) {
+    for (const url of ['/api/v1/catalog/products?state=draft', '/api/v1/catalog/products?cursor=bad',
+      '/api/v1/catalog/products?category=unknown', '/api/v1/catalog/products?limit=0', '/api/v1/catalog/products?limit=51',
+      '/api/v1/catalog/products?category=Panels&cursor=bad%20cursor', '/api/v1/catalog/products/bad',
+      '/api/v1/catalog/products?category=Panels&protectionType=ATS', '/api/v1/catalog/products?protectionType=ATS',
+      '/api/v1/catalog/products?category=Protection']) {
       assert.equal((await app.inject({ method: 'GET', url })).statusCode, 400);
     }
   } finally { await app.close(); }
@@ -280,6 +321,15 @@ test('admin product filters are bounded, allowlisted, normalized, and forwarded 
       filters: { skuPrefix: 'PANEL-01', brand: 'Solar', category: 'Panels', supplierId },
     }]);
 
+    for (const category of ['PV Isolator', 'MCCB']) {
+      const accepted = await app.inject({ method: 'GET', url: `/api/v1/admin/products?category=${encodeURIComponent(category)}`, headers: authorization });
+      assert.equal(accepted.statusCode, 200);
+    }
+    assert.deepEqual(tracked.productQueries.slice(1), [
+      { cursor: null, filters: { category: 'PV Isolator' } },
+      { cursor: null, filters: { category: 'MCCB' } },
+    ]);
+
     for (const invalidQuery of [
       'extra=1', 'category=unknown', 'brand=%20', 'skuPrefix=has%20space',
       'supplierId=bad', `cursor=${'a'.repeat(513)}`,
@@ -299,7 +349,7 @@ test('admin product filters are bounded, allowlisted, normalized, and forwarded 
     assert.deepEqual(tracked.productQueries, [{
       cursor: 'next_01',
       filters: { skuPrefix: 'PANEL-01', brand: 'Solar', category: 'Panels', supplierId },
-    }]);
+    }, { cursor: null, filters: { category: 'PV Isolator' } }, { cursor: null, filters: { category: 'MCCB' } }]);
   } finally { await app.close(); }
 });
 

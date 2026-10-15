@@ -19,7 +19,7 @@ const project: AccountProject = {
 test('account project routes authenticate before parsing or repository access', async () => {
   let calls = 0;
   const never = async (): Promise<never> => { calls++; throw new Error('repository should not run'); };
-  const projects: AccountProjectRepository = { list: never, get: never, create: never, command: never, setActive: never };
+  const projects: AccountProjectRepository = { list: never, get: never, create: never, command: never, setActive: never, manage: never };
   const verifier: IdentityVerifier = { verify: async token => { if (token === 'invalid') throw new ApiError(401, 'UNAUTHENTICATED', 'Rejected.'); return identity; }, close: async () => {} };
   const app = buildApp(config, { logger: false, verifier, projects });
   try {
@@ -43,6 +43,7 @@ test('account project routes authenticate before parsing or repository access', 
 test('account project routes pass verified identity and exact cursors through the repository', async () => {
   const seen: string[] = [];
   const projects: AccountProjectRepository = {
+    async manage() { return { project, activeProjectId: null, preferencesVersion: null }; },
     async list(owner, cursor) { seen.push('list:' + owner.uid + ':' + cursor); return { items: [project], nextCursor: null, activeProjectId: null, preferencesVersion: null }; },
     async get(owner, id) { seen.push('get:' + owner.uid + ':' + id); return project; },
     async create(owner, input) { seen.push('create:' + owner.uid + ':' + input.requestId); return { project, copyReceipt: null }; },

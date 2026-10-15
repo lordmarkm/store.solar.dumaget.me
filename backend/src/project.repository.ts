@@ -4,16 +4,18 @@ import type { VerifiedIdentity } from './auth.js';
 import { ApiError } from './errors.js';
 import { parsePublishedProduct } from './admin-catalog.js';
 import {
-  accountPathId, parseAccountProject, parseBomItem, projectObject, sha256,
+  accountPathId, parseAccountProject, parseBomItem, projectObject, sha256, matchesProjectQuery, parseProjectDetails, parseFreeTextProtectionMetadata,
 } from './customer-projects.js';
 import type {
   AccountProject, ActiveProjectInput, BomItem, CreateProjectInput, FreeTextCommand, GuestCopyInput,
-  GuestListCopyReceipt, ItemInput, ProjectCommand, RestoreCommand, StoreBomItem,
+  GuestListCopyReceipt, ItemInput, ProjectCommand, RestoreCommand, StoreBomItem, ProjectListQuery, ProjectManagementInput,
 } from './customer-projects.js';
 
 export interface AccountProjectPage { items: AccountProject[]; nextCursor: string | null; activeProjectId: string | null; preferencesVersion: number | null }
+export interface ProjectManagementResult { project: AccountProject; activeProjectId: string | null; preferencesVersion: number | null }
 export interface AccountProjectRepository {
-  list(identity: VerifiedIdentity, cursor: string | null): Promise<AccountProjectPage>;
+  list(identity: VerifiedIdentity, cursor: string | null, filters?: ProjectListQuery): Promise<AccountProjectPage>;
+  manage(identity: VerifiedIdentity, id: string, input: ProjectManagementInput): Promise<ProjectManagementResult>;
   get(identity: VerifiedIdentity, id: string): Promise<AccountProject>;
   create(identity: VerifiedIdentity, input: CreateProjectInput): Promise<{ project: AccountProject; copyReceipt: GuestListCopyReceipt | null }>;
   command(identity: VerifiedIdentity, id: string, input: ProjectCommand): Promise<{ project: AccountProject; copyReceipt: GuestListCopyReceipt | null }>;
@@ -66,17 +68,30 @@ function projectHash(value: unknown): string { return plainHash(value); }
 export class FirestoreAccountProjectRepository implements AccountProjectRepository {
   constructor(private readonly database: () => Firestore, private readonly now = () => new Date()) {}
 
-  async list(identity: VerifiedIdentity, cursor: string | null): Promise<AccountProjectPage> {
+  async list(identity: VerifiedIdentity, cursor: string | null, filters: ProjectListQuery = { limit: 50 }): Promise<AccountProjectPage> {
     const customerId = identity.uid;
     if (cursor !== null && !uuidPattern.test(cursor)) throw new ApiError(400, 'INVALID_PROJECT_INPUT', 'Enter a valid project cursor.');
     try {
       const root = this.database().collection('customers').doc(accountPathId(identity));
-      let query = root.collection('projects').orderBy('__name__').limit(51);
+      const enumFilters = (['status', 'classification', 'configuration', 'workScope'] as const).filter(key => filters[key] !== undefined);
+      const budget = filters.search || enumFilters.length > 1 ? 50 : filters.limit;
+      let query: FirebaseFirestore.Query = root.collection('projects');
+      // One equality uses its automatic single-field index; other criteria stay API-side within the read budget.
+      const primary = enumFilters[0];
+      if (primary) query = query.where(primary, '==', filters[primary]);
+      query = query.orderBy('__name__').limit(budget + 1);
       if (cursor) query = query.startAfter(cursor);
       const [page, prefDoc] = await Promise.all([query.get(), root.collection('preferences').doc('current').get()]);
-      const visible = page.docs.slice(0, 50).map(doc => parseAccountProject(doc.data(), doc.id, customerId));
+      const visible: AccountProject[] = [];
+      let consumed = 0;
+      for (const doc of page.docs.slice(0, budget)) {
+        consumed++;
+        const project = parseAccountProject(doc.data(), doc.id, customerId);
+        if (matchesProjectQuery(project, filters)) visible.push(project);
+        if (visible.length === filters.limit) break;
+      }
       const prefs = prefDoc.exists ? parsePreferences(prefDoc.data(), customerId) : null;
-      return { items: visible, nextCursor: page.docs.length > 50 ? visible.at(-1)!.id : null,
+      return { items: visible, nextCursor: consumed < page.docs.length ? page.docs[consumed - 1]!.id : null,
         activeProjectId: prefs?.activeProjectId ?? null, preferencesVersion: prefs?.version ?? null };
     } catch (error) { throw this.sanitize(error); }
   }
@@ -87,6 +102,67 @@ export class FirestoreAccountProjectRepository implements AccountProjectReposito
       const doc = await this.projectRef(identity, id).get();
       if (!doc.exists) throw new ApiError(404, 'PROJECT_NOT_FOUND', 'Project not found.');
       return parseAccountProject(doc.data(), id, identity.uid);
+    } catch (error) { throw this.sanitize(error); }
+  }
+
+  /** Lifecycle changes and active preference clearing commit atomically; BOM planning never becomes a PO. */
+  async manage(identity: VerifiedIdentity, id: string, input: ProjectManagementInput): Promise<ProjectManagementResult> {
+    if (!uuidPattern.test(id)) throw new ApiError(400, 'INVALID_PROJECT_INPUT', 'Enter a valid project ID.');
+    try {
+      const db = this.database(), root = db.collection('customers').doc(accountPathId(identity));
+      const sourceRef = root.collection('projects').doc(id);
+      const targetId = input.action === 'duplicate-project' ? deterministicUuid(['duplicate', identity.uid, id, input.requestId]) : id;
+      const targetRef = root.collection('projects').doc(targetId);
+      const requestRef = root.collection('projectRequests').doc(input.requestId);
+      const prefsRef = root.collection('preferences').doc('current');
+      const payloadHash = projectHash({ sourceId: id, ...input, requestId: undefined });
+      return await db.runTransaction(async tx => {
+        const [sourceDoc, requestDoc, prefsDoc, targetDoc] = await Promise.all([
+          tx.get(sourceRef), tx.get(requestRef), tx.get(prefsRef),
+          targetId === id ? Promise.resolve(null) : tx.get(targetRef),
+        ]);
+        if (!sourceDoc.exists) throw new ApiError(404, 'PROJECT_NOT_FOUND', 'Project not found.');
+        const source = parseAccountProject(sourceDoc.data(), id, identity.uid);
+        let prefs = prefsDoc.exists ? parsePreferences(prefsDoc.data(), identity.uid) : null;
+        if (requestDoc.exists) {
+          const receipt = receiptData(requestDoc.data(), identity.uid, targetId);
+          if (receipt.payloadHash !== payloadHash) throw new ApiError(409, 'PROJECT_REQUEST_CONFLICT', 'Request ID already used for a different project change.');
+          const resultDoc = targetId === id ? sourceDoc : targetDoc;
+          if (!resultDoc?.exists) throw new ApiError(503, 'PROJECT_DATA_INVALID', 'Stored request has no project.');
+          return { project: parseAccountProject(resultDoc.data(), targetId, identity.uid), activeProjectId: prefs?.activeProjectId ?? null, preferencesVersion: prefs?.version ?? null };
+        }
+        if (source.version !== input.expectedVersion || source.version >= Number.MAX_SAFE_INTEGER - 1) throw new ApiError(409, 'PROJECT_CHANGED', 'Project changed. Reload and review before continuing.');
+        if (input.action === 'restore-project' ? source.status !== 'archived'
+          : input.action !== 'duplicate-project' && source.status !== 'draft') throw new ApiError(409, 'PROJECT_NOT_EDITABLE', 'Project is not in the required state.');
+        const at = iso(this.now());
+        let project: AccountProject;
+        if (input.action === 'duplicate-project') {
+          if (targetDoc?.exists) throw new ApiError(409, 'PROJECT_REQUEST_CONFLICT', 'Duplicate identity already exists.');
+          const details = parseProjectDetails(Object.fromEntries(['name', 'classification', 'installation', 'configuration', 'workScope', 'classificationOther', 'installationOther', 'location', 'description', 'notes']
+            .filter(key => Object.hasOwn(source, key)).map(key => [key, source[key as keyof AccountProject]])));
+          project = parseAccountProject({ ...details, name: 'Copy of ' + source.name.slice(0, 112), id: targetId,
+            schemaVersion: 1, customerId: identity.uid, version: 1, status: 'draft', archivedAt: null, createdAt: at, updatedAt: at,
+            bom: { id: 'bom-' + targetId, projectId: targetId, updatedAt: at, items: source.bom.items.map((item, index) => ({
+              ...item, id: (item.kind === 'store-product' ? 'product-' : 'text-') + deterministicUuid(['duplicate-line', input.requestId, index]),
+              createdAt: at, updatedAt: at,
+            })) } }, targetId, identity.uid);
+          tx.create(targetRef, project);
+        } else {
+          const { classificationOther: _c, installationOther: _i, location: _l, description: _d, notes: _n, ...required } = source;
+          const changed = input.action === 'edit-details' ? { ...required, ...input.details } :
+            { ...source, status: input.action === 'archive-project' ? 'archived' : 'draft', archivedAt: input.action === 'archive-project' ? at : null };
+          project = parseAccountProject({ ...changed, version: source.version + 1, updatedAt: at, bom: { ...source.bom, updatedAt: at } }, id, identity.uid);
+          tx.set(sourceRef, project);
+          if (input.action === 'archive-project' && prefs?.activeProjectId === id) {
+            const nextVersion = prefs.version + 1;
+            if (!validVersion(nextVersion)) throw new ApiError(409, 'PREFERENCES_CHANGED', 'Project preferences need review.');
+            prefs = { ...prefs, version: nextVersion, activeProjectId: null, updatedAt: at };
+            tx.set(prefsRef, prefs);
+          }
+        }
+        tx.create(requestRef, { schemaVersion: 1, payloadHash, projectId: targetId, copyReceipt: null });
+        return { project, activeProjectId: prefs?.activeProjectId ?? null, preferencesVersion: prefs?.version ?? null };
+      }, { maxAttempts: 3 });
     } catch (error) { throw this.sanitize(error); }
   }
 
@@ -251,8 +327,11 @@ export class FirestoreAccountProjectRepository implements AccountProjectReposito
       const old = index >= 0 ? items[index] as Extract<BomItem, { kind: 'free-text' }> : null;
       const input = command.input as FreeTextCommand['input'];
       const id = command.itemId ?? 'text-' + deterministicUuid(['bom-text', command.requestId]);
+      const metadata = parseFreeTextProtectionMetadata(input.componentCategory ?? old?.componentCategory,
+        input.componentProtectionType ?? old?.componentProtectionType, input.amperage ?? old?.amperage);
       const item: BomItem = { id, kind: 'free-text', title: input.title, description: input.description, unit: input.unit,
-        quantity: input.quantity, notes: input.notes, estimate: { kind: 'unpriced' }, createdAt: old?.createdAt ?? at, updatedAt: at };
+        quantity: input.quantity, notes: input.notes, ...metadata,
+        estimate: { kind: 'unpriced' }, createdAt: old?.createdAt ?? at, updatedAt: at };
       if (index >= 0) items[index] = item; else { if (items.some(existing => existing.id === id)) throw new ApiError(409, 'PROJECT_REQUEST_CONFLICT', 'BOM item identity is already in use.'); items.push(item); }
       newItems = [item];
     } else if (command.action === 'quantity') {

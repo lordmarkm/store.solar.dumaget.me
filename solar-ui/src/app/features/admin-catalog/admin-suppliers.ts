@@ -1,17 +1,18 @@
 import { Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { NavigationStart, Router, RouterLink } from '@angular/router';
 import { AdminAccessService } from '../../core/admin-access.service';
 import { AdminCatalogApiService } from '../../core/admin-catalog-api.service';
-import type { AdminPage, AdminSupplier } from '../../core/admin-catalog.models';
+import type { AdminPage, AdminSupplier, SupplierListFilters } from '../../core/admin-catalog.models';
 import { AuthSessionService } from '../../core/auth-session.service';
 import { AuthNavigationService } from '../../core/auth-navigation.service';
 import { STOREFRONT_AUTH_ENABLED } from '../../core/firebase-config';
 import { StoreApiError } from '../../core/store-api.service';
+import { Tooltip } from '../../shared/tooltip';
 
 @Component({
   selector: 'app-admin-suppliers',
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, Tooltip],
   templateUrl: './admin-suppliers.html',
 })
 export class AdminSuppliersPage {
@@ -25,32 +26,50 @@ export class AdminSuppliersPage {
   readonly rows = signal<AdminSupplier[]>([]);
   readonly cursor = signal<string | null>(null);
   readonly loading = signal(false);
+  readonly searchPending = signal(false);
   readonly error = signal<string | null>(null);
-  readonly search = signal('');
-  readonly filtered = computed(() => {
-    const query = this.search().trim().toLocaleLowerCase();
-    return this.rows().filter(supplier => !query ||
-      `${supplier.name} ${supplier.region} ${supplier.email} ${supplier.phone} ${supplier.website} ${supplier.description}`.toLocaleLowerCase().includes(query));
-  });
+  readonly namePrefix = signal('');
+  readonly status = signal<'' | 'active' | 'inactive'>('');
   private fetchSequence = 0;
+  private queryGeneration = 0;
   private seenRevision = -1;
   private wasAuthorized = false;
+  private destroyed = false;
+  private routeGeneration = 0;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly router = inject(Router);
 
   constructor() {
-    this.destroyRef.onDestroy(() => { this.fetchSequence++; });
+    const routeSubscription = this.router.events.subscribe(event => {
+      if (event instanceof NavigationStart && event.url.split(/[?#]/, 1)[0] !== '/admin/suppliers') {
+        this.routeGeneration++;
+        this.queryGeneration++; this.fetchSequence++;
+        this.cancelSearchDebounce();
+        this.loading.set(false);
+      }
+    });
+    this.destroyRef.onDestroy(() => {
+      this.destroyed = true;
+      this.queryGeneration++; this.fetchSequence++;
+      this.cancelSearchDebounce(); routeSubscription.unsubscribe();
+    });
     effect(() => {
       const revision = this.auth.sessionRevision();
       const authorized = this.access.authorized();
       if (!authorized) {
-        this.fetchSequence++;
+        this.queryGeneration++; this.fetchSequence++;
+        this.cancelSearchDebounce();
         this.rows.set([]); this.cursor.set(null); this.error.set(null); this.loading.set(false);
-        this.search.set(''); this.wasAuthorized = false; this.seenRevision = revision; this.authorizedRevision.set(-1);
+        this.namePrefix.set(''); this.status.set(''); this.wasAuthorized = false; this.seenRevision = revision; this.authorizedRevision.set(-1);
         return;
       }
       this.authorizedRevision.set(revision);
       if (!this.wasAuthorized || revision !== this.seenRevision) {
         this.wasAuthorized = true; this.seenRevision = revision;
-        this.rows.set([]); this.cursor.set(null); this.search.set('');
+        this.cancelSearchDebounce();
+        this.queryGeneration++; this.fetchSequence++;
+        this.rows.set([]); this.cursor.set(null); this.error.set(null); this.loading.set(false);
+        this.namePrefix.set(''); this.status.set('');
         void this.load(null, true, revision);
       }
     });
@@ -61,25 +80,81 @@ export class AdminSuppliersPage {
     if (next) await this.load(next, false, this.auth.sessionRevision());
   }
 
+  setNamePrefix(value: string): void {
+    this.cancelSearchDebounce();
+    this.namePrefix.set(value.slice(0, 160));
+    const generation = this.resetSupplierQuery();
+    if (!this.canAccess()) return;
+    this.searchPending.set(true);
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      this.searchPending.set(false);
+      if (generation === this.queryGeneration) void this.load(null, true, this.auth.sessionRevision());
+    }, 300);
+  }
+
+  setStatus(value: '' | 'active' | 'inactive'): void {
+    this.status.set(value);
+    this.cancelSearchDebounce();
+    this.resetSupplierQuery();
+    if (this.canAccess()) void this.load(null, true, this.auth.sessionRevision());
+  }
+
+  clearFilters(): void {
+    this.cancelSearchDebounce();
+    this.namePrefix.set(''); this.status.set('');
+    this.resetSupplierQuery();
+    if (this.canAccess()) void this.load(null, true, this.auth.sessionRevision());
+  }
+
+  supplierFilters(): SupplierListFilters {
+    const filters: SupplierListFilters = {};
+    const namePrefix = this.namePrefix().trim();
+    if (namePrefix) filters.namePrefix = namePrefix;
+    const status = this.status();
+    if (status) filters.status = status;
+    return filters;
+  }
+
+  private resetSupplierQuery(): number {
+    this.queryGeneration++; this.fetchSequence++;
+    this.rows.set([]); this.cursor.set(null); this.error.set(null); this.loading.set(false);
+    return this.queryGeneration;
+  }
+
+  private cancelSearchDebounce(): void {
+    if (this.debounceTimer !== null) clearTimeout(this.debounceTimer);
+    this.debounceTimer = null;
+    this.searchPending.set(false);
+  }
+
   retry(): void {
     if (!this.canAccess() || this.loading()) return;
     void this.load(this.rows().length ? this.cursor() : null, !this.rows().length, this.auth.sessionRevision());
   }
 
   private async load(cursor: string | null, replace: boolean, revision: number): Promise<void> {
-    if (!this.canAccess() || revision !== this.auth.sessionRevision() || this.loading()) return;
+    if (!this.canAccess() || revision !== this.auth.sessionRevision() || this.destroyed || this.loading()) return;
     const sequence = ++this.fetchSequence;
+    const generation = this.queryGeneration;
+    const routeGeneration = this.routeGeneration;
+    const filters = this.supplierFilters();
     this.loading.set(true); this.error.set(null);
     try {
-      const page: AdminPage<AdminSupplier> = await this.api.listSuppliers(cursor);
-      if (sequence !== this.fetchSequence || !this.canAccess() || revision !== this.auth.sessionRevision()) return;
+      const page: AdminPage<AdminSupplier> = await this.api.listSuppliers(cursor, filters);
+      if (!this.isCurrentRequest(sequence, generation, routeGeneration, revision)) return;
       this.rows.set(replace ? page.items : [...this.rows(), ...page.items]);
       this.cursor.set(page.nextCursor);
     } catch (error) {
-      if (sequence === this.fetchSequence && this.canAccess() && revision === this.auth.sessionRevision()) {
+      if (this.isCurrentRequest(sequence, generation, routeGeneration, revision)) {
         this.error.set(error instanceof StoreApiError ? error.message : 'Unable to load suppliers. Try again.');
       }
-    } finally { if (sequence === this.fetchSequence) this.loading.set(false); }
+    } finally { if (this.isCurrentRequest(sequence, generation, routeGeneration, revision)) this.loading.set(false); }
+  }
+
+  private isCurrentRequest(sequence: number, generation: number, routeGeneration: number, revision: number): boolean {
+    return !this.destroyed && sequence === this.fetchSequence && generation === this.queryGeneration
+      && routeGeneration === this.routeGeneration && this.canAccess() && revision === this.auth.sessionRevision();
   }
 
   statusMessage(): string {

@@ -19,6 +19,10 @@ describe('product visual', () => {
     const image = fixture.nativeElement.querySelector('img') as HTMLImageElement;
     expect(image.src).toBe(url);
     expect(image.alt).toBe('Solar panel product image');
+    const trigger = image.closest('button') as HTMLButtonElement | null;
+    expect(trigger).not.toBeNull();
+    expect(trigger?.getAttribute('aria-label')).toBe('Enlarge Solar panel product image');
+    expect(trigger?.title).toBe('Enlarge Solar panel product image');
     expect(fixture.nativeElement.querySelector('svg')).toBeNull();
   });
 
@@ -29,7 +33,9 @@ describe('product visual', () => {
     fixture.componentRef.setInput('images', [{ id: hash, url: detailUrl, thumbnailUrl: thumbUrl, width: 1200, height: 900 }]);
     fixture.componentRef.setInput('variant', 'thumb');
     fixture.detectChanges();
-    expect((fixture.nativeElement.querySelector('img') as HTMLImageElement).src).toBe(thumbUrl);
+    const image = fixture.nativeElement.querySelector('img') as HTMLImageElement;
+    expect(image.src).toBe(thumbUrl);
+    expect(image.closest('button')).not.toBeNull();
   });
 
   it('renders the selected full-size image in the detail view', () => {
@@ -42,12 +48,15 @@ describe('product visual', () => {
     ]);
     fixture.componentRef.setInput('imageIndex', 1);
     fixture.detectChanges();
-    expect((fixture.nativeElement.querySelector('img') as HTMLImageElement).src).toBe(base(secondId) + 'detail.webp');
+    const image = fixture.nativeElement.querySelector('img') as HTMLImageElement;
+    expect(image.src).toBe(base(secondId) + 'detail.webp');
+    expect(image.closest('button')).not.toBeNull();
   });
 
   it('keeps the illustrative category SVG as fallback when no photo is supplied', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('img')).toBeNull();
     expect(fixture.nativeElement.querySelector('svg')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('button')).toBeNull();
   });
 });

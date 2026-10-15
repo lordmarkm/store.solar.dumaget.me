@@ -63,7 +63,7 @@ export class WorkspaceShell implements OnDestroy {
   @ViewChild('mobileNavigation') mobileNavigation!: TemplateRef<unknown>;
   readonly links = [
     { label: 'Products', path: '/admin/products', icon: 'ki-clipboard' },
-    { label: 'Inventory preview', path: '/admin/inventory', icon: 'ki-filter' },
+    { label: 'Inventory', path: '/admin/inventory', icon: 'ki-filter' },
     { label: 'Suppliers', path: '/admin/suppliers', icon: 'ki-award' },
   ];
   constructor() { inject(Router).events.pipe(filter(event => event instanceof NavigationEnd), takeUntilDestroyed()).subscribe(() => this.closeMenu()); }

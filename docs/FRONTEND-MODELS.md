@@ -1,5 +1,64 @@
 # Frontend model contracts
 
+MCB extension (2026-10-12): private/public product DTOs and catalog Product views
+accept optional protectionType: MCB|ATS|null and mcbSpecifications:
+{type: AC|DC, amperage: number}|null. Explicit MCBs require complete ratings,
+including drafts, and category Circuit breakers. ATS is a separate category
+with no MCB specifications; other/legacy records remain unclassified. Amperage is
+positive finite amperes, not a formatted string.
+ATS also requires atsSpecifications: {amperage: number} on every create/Save/Publish.
+Missing/null legacy ATS ratings remain readable as unknown; outbound validators
+and forms require completion. Clear inactive subtype specifications explicitly.
+Public details retain these typed facts but not private sourcing URLs. See
+[MCB specifications](MCB-SPECIFICATIONS.md) for validation/preservation semantics.
+
+Supplier sourcing extension (2026-10-12): private ProductCreateInput,
+ProductUpdateInput and AdminProduct accept optional supplierUrl. Legacy omission
+is valid; empty means unset. HTTPS source links retain the complete variant query
+and are required for Shopee products in create/edit/publication validation.
+PublishedProduct and public catalog models deliberately exclude this private field.
+See [admin catalog management](ADMIN-CATALOG-MANAGEMENT.md) for validation and
+transactional enforcement. Unknown price/image information is never synthesized.
+
+Actor presentation update (2026-10-11): private InventoryMovement retains
+actorUid for audit/consistency checks and adds optional actorName, a canonical
+server-derived display name of at most 160 characters. Legacy omission is valid;
+present invalid/empty/UID-equal names are rejected. History and movement CSV show
+the name or "Name unavailable", never the UID. Balance export actor names are not
+projected yet, so that column uses the unavailable label rather than updatedBy.
+See [inventory management](INVENTORY-MANAGEMENT.md) for snapshot/legacy resolution
+and cost bounds.
+
+Builder foundation update (2026-10-11):
+[builder.models.ts](../solar-ui/src/app/core/models/builder.models.ts) adds ordered
+category definitions, independent store/free-text staged rows, optional planning
+requirements, scoped rule results and transient suggestion/review context. New rows
+start selected; repeated references are not merged. Cables/Other have no store
+category mapping yet; free text stays unpriced. Context captures account/project/
+project-version/stage-version/fact identity for future stale-result fencing; types
+alone do not implement it. No builder page, ApplyBuilderBatch API, saved Build,
+ProductSnapshot or stock mutation is added. See [data audit](BUILDER-DATA-AUDIT.md)
+and [builder plan](../plans/PROJECT-BUILDER-PLAN.md).
+
+Account Projects management update (2026-10-09): `AccountProject` extends Project
+with an operational concurrency version. `ProjectListQuery` carries optional
+search/status/classification/configuration/workScope and limit; `AccountProjectPage`
+contains the returned items, continuation and active preferences. `ProjectManagementAction`
+separates edit-details/archive-project/restore-project/duplicate-project from BOM
+line commands (whose restore action is removed-line Undo). Commands capture the
+reviewed project version and retry identity; these are not PO snapshots/revisions.
+See [account Projects](ACCOUNT-PROJECTS.md) for the connected implementation.
+
+Physical inventory extension (2026-10-09): `core/inventory.models.ts` adds
+`InventoryLocation`, `InventoryBalance`, `InventoryMovement`, `InventoryRow`,
+paged responses and explicit location/stock command DTOs. `InventoryApiService`
+uses the shared authenticated transport, fixed admin routes and runtime validation.
+Balances are nullable (Unknown, distinct from counted zero), keyed by product and
+location, and tied to the product's fixed unit. Stock commands carry both product
+and balance concurrency versions plus a retry UUID. Movement history is immutable;
+these versions are operational concurrency tokens, not locked PO snapshots.
+See [inventory management](INVENTORY-MANAGEMENT.md) for persistence and scope.
+
 Product-image extension (2026-10-08): private create/update/master DTOs and public
 product projections gain optional images: ProductImage[] (up to six canonical
 uploaded image descriptors). Each descriptor carries id, url, thumbnailUrl,
@@ -41,7 +100,7 @@ or credentials enter the shared DTOs. This does not connect the existing synthet
 project repository, assign guest/preview data to an Auth UID, or implement PO
 history. See [integration foundation](FIREBASE-INTEGRATION.md).
 
-Implemented TypeScript contracts for the [user-facing plan](USER-FACING-PLAN.md).
+Implemented TypeScript contracts for the [user-facing plan](../plans/USER-FACING-PLAN.md).
 Import through `solar-ui/src/app/core/models.ts`; the new definitions live in its
 adjacent `models/` directory. These are frontend DTOs and transient view/input
 contracts, **not an implemented backend, database schema, or purchasing workflow**.
@@ -83,7 +142,7 @@ not public catalog availability or an inventory ledger. Editing existing rows,
 structured specs/media, publishing and authoritative admin DTOs remain future work.
 Build, app/spec checks and 142 tests/23 files pass for the extension. The older
 verification counts below are historical; browser flow/theme/focus checks are in
-[the admin plan](ADMIN-PRODUCT-MANAGEMENT-PLAN.md).
+[the admin plan](../plans/ADMIN-PRODUCT-MANAGEMENT-PLAN.md).
 
 Admin-domain policy extension (2026-10-06): `core/admin-access-policy.ts` defines
 `AdminAccessPolicy` (`adminEmailDomains`) and `AdminEmailIdentity` (`email`,
@@ -231,6 +290,27 @@ can flag an out-of-stock or missing reference without changing the line type or
 dropping the requirement. Free-text estimates explicitly distinguish `unpriced`
 from `manual-estimate`; unknown price is not zero and manual tax remains unspecified.
 
+FreeTextBomItem optionally carries componentCategory (Inverters, Panels,
+Batteries, Mounting, Circuit breakers, Surge Protection Device, ATS, PV Isolator or MCCB), also accepted by FreeTextInput and the
+authenticated free-text command. The component picker seeds this explicit value;
+frontend/backend parsing rejects null/unknown categories and store-product misuse.
+Omitted legacy values stay under Other requirements, never inferred from titles.
+Edits omitting the field preserve saved categories. Reload, duplicate and Undo
+retain it. This additive schema-v1 field is UI grouping/presence metadata, not
+verified electrical facts, ProductSnapshots or a compatibility result.
+
+Typed free-text ATS additionally carries componentProtectionType: 'ATS' and
+amperage: number, with componentCategory: 'ATS'. Explicit legacy Protection/ATS
+stays readable; untyped legacy Protection is grouped as Other. Positive finite
+amperage <= Number.MAX_SAFE_INTEGER is mandatory, with fractional ratings
+allowed. Models/FreeTextInput, frontend/account parsers and API validate this
+metadata; edits preserve it and validate the effective merged line. Store-product
+lines cannot supply these fields. They are user-entered planning facts, not
+verified catalog ratings or compatibility approval. See BOM-COMPONENTS.md v5
+and [product taxonomy](PRODUCT-CATEGORIES.md). Product/PublishedProduct category
+may be null only to display unclassified legacy data; selectable categories do not
+include Protection or Other.
+
 `BomSelection` is view state: initialize all project rows checked when presented,
 then preserve explicit deselection. It is not a property of BOM items, an approval,
 or a PO status. Guest lists have no free-text items or checkbox selection.
@@ -332,6 +412,19 @@ remain TBD; no delivered-status policy is inferred here.
   unions, disabled buttons, and receipts alone are not authorization mechanisms.
 
 ## Verification
+
+Inventory operations (2026-10-09) extend the separate private admin contracts in
+inventory.models.ts: InventoryCountInput, InventoryTransferInput/Result,
+InventorySettings/Input and InventoryStockStatus. InventoryManualMovementKind
+retains the six adjustment kinds; the read ledger additionally supports count and
+linked transfer-in/transfer-out. Inputs carry expected product/pool/settings
+versions and request UUIDs; transfer results include both authoritative balances
+and their movements. Rows include nullable settings and server-computed status,
+and filters can request that status before API pagination. Counts and transfers
+must use their dedicated methods, never the manual-adjustment endpoint. CSV helpers
+serialize authoritative pages and preserve transfer links/threshold metadata.
+These models do not implement reservations or purchase-order policy. See
+[inventory management](INVENTORY-MANAGEMENT.md).
 
 Latest local catalog/project-BOM slice (2026-10-06): production build, 62 tests
 across 11 files, and app/spec TypeScript checks passed. Added tests cover atomic

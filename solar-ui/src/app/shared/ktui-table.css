@@ -1,0 +1,23 @@
+/* KTUI supplies table appearance and rendering. These scoped adaptations only
+   wrap/stack its generated cells so no data or action requires sideways scroll. */
+.solar-ktui-table-host { display: block; min-width: 0; }
+.solar-ktui-table { min-width: 0; overflow-wrap: anywhere; }
+.solar-ktui-table .kt-table { width: 100%; table-layout: fixed; }
+.solar-ktui-table .kt-table th,
+.solar-ktui-table .kt-table td { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.solar-ktui-table .solar-table-empty { padding: 2.5rem 1rem; text-align: center; }
+@media (max-width: 1023px) {
+  .solar-ktui-table .kt-table,
+  .solar-ktui-table .kt-table tbody { display: block; }
+  .solar-ktui-table .kt-table colgroup { display: none; }
+  .solar-ktui-table .kt-table thead { display: none; }
+  .solar-ktui-table .kt-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr); padding: 0.5rem; }
+  .solar-ktui-table .kt-table tbody td { display: block; width: auto; padding: 0.75rem; }
+  .solar-ktui-table .kt-table tbody td::before { content: attr(data-label); display: block; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--secondary-foreground); }
+  .solar-ktui-table .kt-table tbody td:first-child,
+  .solar-ktui-table .kt-table tbody td:last-child { grid-column: 1 / -1; }
+  .solar-ktui-table .kt-table tbody td.solar-table-empty::before { display: none; }
+}
+@media (min-width: 640px) and (max-width: 1023px) {
+  .solar-ktui-table .kt-table tbody tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

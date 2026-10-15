@@ -10,13 +10,15 @@ import { AuthSessionService } from '../../core/auth-session.service';
 import { AuthNavigationService } from '../../core/auth-navigation.service';
 import { STOREFRONT_AUTH_ENABLED } from '../../core/firebase-config';
 import { StoreApiError } from '../../core/store-api.service';
+import { KtuiTable, KtuiTableColumn } from '../../shared/ktui-table';
 import { Tooltip } from '../../shared/tooltip';
+import { ProductLightboxDirective } from '../../shared/product-lightbox';
 
-const PRODUCT_CATEGORIES = ['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection'] as const;
+import { PRODUCT_CATEGORIES } from '../../core/product-categories';
 
 @Component({
   selector: 'app-admin-products',
-  imports: [CurrencyPipe, FormsModule, RouterLink, Tooltip],
+  imports: [CurrencyPipe, FormsModule, RouterLink, KtuiTable, KtuiTableColumn, Tooltip, ProductLightboxDirective],
   templateUrl: './admin-products.html',
 })
 export class AdminProductsPage {
@@ -28,6 +30,7 @@ export class AdminProductsPage {
   private readonly api = inject(AdminCatalogApiService);
   private readonly destroyRef = inject(DestroyRef);
   readonly rows = signal<AdminProduct[]>([]);
+  readonly tableRowKey = (product: AdminProduct): string => product.id;
   readonly cursor = signal<string | null>(null);
   readonly loading = signal(false);
   readonly searchPending = signal(false);

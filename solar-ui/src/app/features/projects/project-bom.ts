@@ -14,18 +14,38 @@ import { ProductDialog } from '../../shared/product-dialog';
 import { Product } from '../../core/models';
 import { projectUiSession } from '../../shared/project-ui-session';
 import { ProductVisualComponent } from '../../shared/product-visual';
+import { ConfirmationService } from '../../shared/ktui-confirmation';
+import { ComponentDefinition, ComponentBomRow, componentBomRows, componentBomTableRows } from '../../core/component-bom';
+import { KtuiTable, KtuiTableColumn } from '../../shared/ktui-table';
+import { Tooltip } from '../../shared/tooltip';
+import { ProjectComponentPicker } from '../../shared/project-component-picker';
+import { IntegerQuantity } from '../../shared/integer-quantity';
 
-@Component({ selector: 'app-project-bom', imports: [CurrencyPipe, FormsModule, RouterLink, ProductVisualComponent], templateUrl: './project-bom.html' })
+@Component({ selector: 'app-project-bom', imports: [CurrencyPipe, FormsModule, RouterLink, ProductVisualComponent, KtuiTable, KtuiTableColumn, Tooltip, IntegerQuantity], templateUrl: './project-bom.html' })
 export class ProjectBomPage {
   private readonly access = inject(CustomerAccessService);
   readonly service = inject(ProjectService);
   private readonly route = inject(ActivatedRoute);
   private readonly dialog = inject(Dialog);
+  private readonly confirmations = inject(ConfirmationService);
   private readonly destroyRef = inject(DestroyRef);
   private modal?: { close(): void };
   readonly projectId = toSignal(this.route.paramMap.pipe(map(params => params.get('projectId'))), { initialValue: null });
   readonly project = computed(() => this.access.canAccessProjects() ? this.service.projects().find(project => project.id === this.projectId() && project.customerId === this.access.customerId()) ?? null : null);
   readonly rows = computed(() => this.project()?.bom.items.map(item => projectBomRow(item, this.service.products())) ?? []);
+  readonly components = computed(() => componentBomRows(this.rows(), this.project()?.configuration ?? null));
+  readonly componentTableEntries = computed(() => componentBomTableRows(this.components(), this.project()?.status === 'draft'));
+  readonly componentKey = (row: ComponentBomRow) => row.key;
+  chooseComponent(component: ComponentDefinition): void {
+    if (this.modal || this.busy() || this.loading() || !this.access.canAccessProjects() || this.project()?.status !== 'draft') return;
+    const owner = this.session.capture(), id = this.projectId()!;
+    const ref = this.dialog.open<boolean>(ProjectComponentPicker, { data: { projectId: id, component }, width: '800px', maxWidth: 'calc(100vw - 32px)', ariaLabelledBy: 'component-picker-title bom-line-editor-title', panelClass: 'solar-dialog-panel', backdropClass: 'solar-dialog-backdrop' });
+    this.modal = ref;
+    ref.closed.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(added => {
+      if (this.modal === ref) this.modal = undefined;
+      if (added && this.session.current(owner) && id === this.projectId()) this.message.set('Equipment added to this project.');
+    });
+  }
   readonly excluded = signal<ReadonlySet<string>>(new Set());
   readonly selected = computed(() => this.rows().filter(row => this.isSelected(row.item.id)));
   readonly allChecked = computed(() => this.rows().length > 0 && this.selected().length === this.rows().length);
@@ -36,7 +56,6 @@ export class ProjectBomPage {
   readonly quantityDrafts = signal<Partial<Record<string, number>>>({});
   readonly error = signal<string | null>(null);
   readonly message = signal('');
-  readonly removing = signal<string | null>(null);
   readonly removed = signal<{ projectId: string; item: BomItem; index: number } | null>(null);
   readonly undoAvailable = computed(() => this.removed()?.projectId === this.projectId());
   readonly busy = signal(false);
@@ -53,7 +72,7 @@ export class ProjectBomPage {
   private clearView(): void {
     this.loadSequence++; this.modal?.close(); this.modal = undefined;
     this.busy.set(false); this.loading.set(false); this.quantityDrafts.set({});
-    this.error.set(null); this.message.set(''); this.removing.set(null); this.removed.set(null);
+    this.error.set(null); this.message.set(''); this.removed.set(null);
   }
   async reload(): Promise<void> {
     const id = this.projectId();
@@ -106,10 +125,23 @@ export class ProjectBomPage {
     ref.closed.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => { this.modal = undefined; });
   }
   async remove(item: BomItem): Promise<void> {
-    if (this.removing() !== item.id || !this.project()) return;
-    const index = this.project()!.bom.items.findIndex(line => line.id === item.id);
+    if (this.modal || this.busy() || this.loading() || !this.access.canAccessProjects() || this.project()?.status !== 'draft') return;
+    const owner = this.session.capture(), sequence = this.loadSequence;
     const id = this.projectId()!;
-    await this.write(() => this.service.removeItem(id, item.id), () => { this.removed.set({ projectId: id, item, index }); this.removing.set(null); this.message.set('Line removed. Undo is available until another removal or leaving this page.'); });
+    const ref = this.confirmations.open({
+      title: 'Remove BOM line?',
+      message: `Remove ${projectBomRow(item, this.service.products()).title} from this project’s BOM? No catalog item or purchase order will be deleted.`,
+      confirmLabel: 'Confirm removal', cancelLabel: 'Keep line',
+    });
+    this.modal = ref;
+    const confirmed = await new Promise<boolean>(resolve => ref.closed.subscribe(resolve));
+    if (this.modal === ref) this.modal = undefined;
+    if (!confirmed || !this.session.current(owner) || id !== this.projectId() || sequence !== this.loadSequence) return;
+    const current = this.project()?.bom.items.find(line => line.id === item.id);
+    // Never remove a changed line on behalf of a stale confirmation.
+    if (!current || JSON.stringify(current) !== JSON.stringify(item)) return;
+    const index = this.project()!.bom.items.findIndex(line => line.id === item.id);
+    await this.write(() => this.service.removeItem(id, item.id), () => { this.removed.set({ projectId: id, item: current, index }); this.message.set('Line removed. Undo is available until another removal or leaving this page.'); });
   }
   async undo(): Promise<void> {
     const removed = this.removed();

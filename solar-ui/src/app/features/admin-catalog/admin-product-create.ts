@@ -11,17 +11,20 @@ import { AuthSessionService } from '../../core/auth-session.service';
 import { AuthNavigationService } from '../../core/auth-navigation.service';
 import { STOREFRONT_AUTH_ENABLED } from '../../core/firebase-config';
 import { StoreApiError } from '../../core/store-api.service';
+import { supplierProductUrlError } from '../../core/supplier-product-url';
 import { AdminDiscardDialog } from './admin-discard-dialog';
 import { parsePreviewPrice } from '../products/product-draft';
 import { panelSpecificationErrors, panelSpecificationPayload, type PanelSpecifications } from '../../core/panel-specifications';
 import { PanelSpecificationFields } from '../../shared/panel-specification-fields';
 import { ProductImageUploader } from '../../shared/product-image-uploader';
 import type { ProductImage } from '../../core/product-images';
+import { parseMcbAmperage, parseAtsAmperage } from '../../core/mcb-specifications';
+import { PRODUCT_CATEGORIES } from '../../core/product-categories';
 
-interface ProductForm { sku: string; name: string; brand: string; category: string; unitCode: string; description: string; priceText: string; supplierId: string; panelSpecifications: PanelSpecifications; images: ProductImage[]; }
+interface ProductForm { sku: string; name: string; brand: string; category: string; protectionType: string; mcbType: string; mcbAmperage: string; atsAmperage: string; unitCode: string; description: string; priceText: string; supplierId: string; supplierUrl: string; panelSpecifications: PanelSpecifications; images: ProductImage[]; }
 type ProductErrors = Partial<Record<keyof ProductForm, string>>;
-const EMPTY: ProductForm = { sku: '', name: '', brand: '', category: '', unitCode: '', description: '', priceText: '', supplierId: '', panelSpecifications: {}, images: [] };
-const CATEGORIES = ['Panels', 'Inverters', 'Batteries', 'Mounting', 'Protection'] as const;
+const EMPTY: ProductForm = { sku: '', name: '', brand: '', category: '', protectionType: '', mcbType: '', mcbAmperage: '', atsAmperage: '', unitCode: '', description: '', priceText: '', supplierId: '', supplierUrl: '', panelSpecifications: {}, images: [] };
+const CATEGORIES = PRODUCT_CATEGORIES;
 const UNITS = ['unit', 'panel', 'kit'] as const;
 const MAX_AMOUNT_MINOR = 99_999_999_999_999;
 
@@ -32,6 +35,12 @@ function validate(input: ProductForm, suppliers: readonly AdminSupplier[]): Prod
   if (!name || name.length > 160) errors.name = 'Enter a product name of 1–160 characters.';
   if (input.brand.trim().length > 80) errors.brand = 'Keep the brand to 80 characters or fewer.';
   if (input.category && !CATEGORIES.includes(input.category as typeof CATEGORIES[number])) errors.category = 'Choose a listed category or leave it unset.';
+  if (input.category === 'Circuit breakers') {
+    if (input.mcbType !== 'AC' && input.mcbType !== 'DC') errors.mcbType = 'Choose AC or DC.';
+    if (parseMcbAmperage(input.mcbAmperage) === null) errors.mcbAmperage = 'Enter a valid amperage greater than zero.';
+  }
+  if (input.category === 'ATS' && parseAtsAmperage(input.atsAmperage) === null)
+    errors.atsAmperage = 'Enter a valid amperage greater than zero.';
   if (input.unitCode && !UNITS.includes(input.unitCode as typeof UNITS[number])) errors.unitCode = 'Choose a listed unit or leave it unset.';
   if (input.description.length > 4000) errors.description = 'Keep the description to 4,000 characters or fewer.';
   if (input.priceText.trim()) {
@@ -39,6 +48,8 @@ function validate(input: ProductForm, suppliers: readonly AdminSupplier[]): Prod
     if (!price || price.amountMinor > MAX_AMOUNT_MINOR) errors.priceText = 'Enter a PHP amount from 0 to 999,999,999,999.99 with at most two decimal places and no commas.';
   }
   if (!input.supplierId || !suppliers.some(supplier => supplier.id === input.supplierId && supplier.status === 'active')) errors.supplierId = 'Choose an active supplier from the loaded supplier records.';
+  const supplierUrlError = supplierProductUrlError(input.supplierUrl, suppliers.find(supplier => supplier.id === input.supplierId)?.name);
+  if (supplierUrlError) errors.supplierUrl = supplierUrlError;
   if (input.category === 'Panels' && Object.keys(panelSpecificationErrors(input.panelSpecifications)).length) errors.panelSpecifications = 'Review the panel specification fields.';
   return errors;
 }
@@ -71,6 +82,8 @@ export class AdminProductCreatePage {
   readonly supplierCursor = signal<string | null>(null);
   readonly suppliersLoading = signal(false);
   readonly suppliersError = signal<string | null>(null);
+  readonly selectedSupplier = computed(() => this.suppliers().find(supplier => supplier.id === this.input().supplierId) ?? null);
+  readonly supplierUrlRequired = computed(() => this.selectedSupplier()?.name.trim().toLowerCase() === 'shopee');
   readonly errors = computed(() => validate(this.input(), this.suppliers()));
   readonly dirty = computed(() => JSON.stringify(this.input()) !== JSON.stringify(EMPTY));
   readonly categories = CATEGORIES;
@@ -112,7 +125,18 @@ export class AdminProductCreatePage {
   update<K extends keyof ProductForm>(field: K, value: ProductForm[K]): void {
     const next = field === 'sku' ? String(value).toUpperCase() : value;
     if (this.input()[field] === next) return;
-    this.input.update(input => ({ ...input, [field]: next }));
+    this.input.update(input => {
+      const updated = { ...input, [field]: next };
+      if (field === 'category') {
+        updated.protectionType = next === 'Circuit breakers' ? 'MCB' : next === 'ATS' ? 'ATS' : '';
+        if (next !== 'Circuit breakers') { updated.mcbType = ''; updated.mcbAmperage = ''; }
+        if (next !== 'ATS') updated.atsAmperage = '';
+      } else if (field === 'protectionType') {
+        if (next !== 'MCB') { updated.mcbType = ''; updated.mcbAmperage = ''; }
+        if (next !== 'ATS') updated.atsAmperage = '';
+      }
+      return updated;
+    });
     this.reviewedPayload = null; this.requestId = null; this.saveError.set(null);
   }
   showError(field: keyof ProductForm): string | null { return this.attempted() ? this.errors()[field] ?? null : null; }
@@ -155,6 +179,8 @@ export class AdminProductCreatePage {
       category: input.category ? input.category as ProductCreateInput['category'] : null,
       unitCode: input.unitCode ? input.unitCode as ProductCreateInput['unitCode'] : null,
       description: input.description, amountMinor: price?.amountMinor ?? null, supplierId: input.supplierId,
+      supplierUrl: input.supplierUrl.trim(),
+      ...protectionPayload(input),
       images: [...input.images],
       ...panelSpecificationPayload(input.category, input.panelSpecifications),
     };
@@ -214,4 +240,17 @@ export class AdminProductCreatePage {
     afterNextRender(() => (this.host.nativeElement.querySelector<HTMLElement>('[aria-invalid="true"]')
       ?? this.host.nativeElement.querySelector<HTMLElement>('[role="alert"]'))?.focus(), { injector: this.injector });
   }
+}
+
+function protectionPayload(input: ProductForm): Pick<ProductCreateInput, 'protectionType' | 'mcbSpecifications' | 'atsSpecifications'> | Record<string, never> {
+  if (input.category === 'Circuit breakers') {
+    const amperage = parseMcbAmperage(input.mcbAmperage);
+    if ((input.mcbType === 'AC' || input.mcbType === 'DC') && amperage !== null)
+      return { protectionType: 'MCB', mcbSpecifications: { type: input.mcbType, amperage } };
+  }
+  if (input.category === 'ATS') {
+    const amperage = parseAtsAmperage(input.atsAmperage);
+    if (amperage !== null) return { protectionType: 'ATS', atsSpecifications: { amperage } };
+  }
+  return {};
 }

@@ -1,5 +1,249 @@
 # Solar ecommerce UI theme
 
+## Names, not internal IDs
+
+Internal IDs must never appear as user-visible or accessible display content,
+including supplier rows, unavailable-item fallbacks, dialogs and exported files.
+Use names, SKUs and meaningful business codes; use an honest unavailable-name
+fallback when necessary. IDs remain internal for stable routing, form values,
+tracking, joins and authorization. Do not replace identity with mutable names.
+
+## Header navigation
+
+Do not link to other pages from page or section headers: no clickable heading
+titles or navigation shortcuts such as inventory's Manage products. Let the
+sidebar handle cross-page navigation. Headers may expose relevant actions on
+the current page (create, edit in place, export), not duplicate sidebar links.
+Shared app-shell navigation and contextual record actions outside headers remain
+separate. The inventory header shortcut is removed; audit other old violations.
+
+## Mandatory library tables and dialog footers
+
+All browsable tables use an established table/datatable library's supported
+component and design, not a bespoke table or a native table merely decorated
+with vendor classes. Use the installed KTUI DataTable and shared Angular
+KtuiTable/KtuiTableColumn adapter; preserve cost-first choices and avoid paid
+enterprise features. Shared adapters may supply API-backed data, column definitions and
+business-action templates, not recreate the library table engine. Keep bounded
+server filtering/pagination, truthful totals, theme tokens, accessible icon-only
+actions and no horizontal scrolling. A widget is not permission to fetch the
+entire dataset or invent counts. KTUI renders the supplied API batch; its
+total-based paginator, local search/sort and persisted client query state are
+disabled. Existing API cursor controls remain outside the table. Responsive
+styles wrap/stack KTUI-generated cells instead of duplicating mobile markup.
+See [KTUI table integration](docs/KTUI-TABLES.md). Existing custom tables require migration.
+
+Scrollbar-lock verification, 2026-10-13: the native BOM confirmation previously
+widened the main content from 686.58px to 700.21px. With `scrollbar-gutter: stable`
+on `html`, repeated before/open/cancel measurements retained the same main and
+BOM-section rectangle and scroll position, with native body scroll locking intact
+and no horizontal overflow. The 390px responsive layout also had no horizontal
+overflow. No BOM data was changed. All 20 focused confirmation/project tests and
+the production build passed; the existing 750kB initial-bundle warning remains.
+
+Dialogs must not shift the background when opened or closed as the vertical
+scrollbar disappears or returns. The shared document root uses a stable
+scrollbar gutter to keep layout width constant while preserving native
+KTUI/CDK scroll locking. Do not add horizontal scrollbars, clipping, or another
+overflow workaround, and do not introduce a custom popup or edit packages/vendor
+files for this behavior. Apply this to native confirmation dialogs and CDK
+dialogs.
+
+Every dialog Close button belongs in the footer at the lower right, as the
+rightmost action. No header/body Close or top-right X, including duplicates.
+Cancel serving as dismissal follows the same rule. Use a visible secondary KTUI
+button and keep it last and right-aligned when actions wrap on mobile. Make the
+footer reachable while only the body scrolls vertically. Preserve dirty/busy
+guards, existing Escape/backdrop behavior, focus trapping and trigger focus
+return. This rule applies to customer/admin editors, wizards, details/history
+popups and confirmations and supersedes older placement examples below.
+
+### Action confirmation dialogs
+
+Action confirmations (for example, "Remove this BOM line?" with Confirm removal
+and Keep line) use the installed native KTUI Modal (`KTModal`) through the
+shared thin Angular adapter. Do not use inline confirmation strips,
+`window.confirm`, or a custom overlay engine. The adapter supplies business
+text/buttons and manages KTModal lifecycle only; KTUI owns modal behavior. Keep
+authorization, read-only, busy and session fences intact; require an explicit
+confirmation before executing the reviewed action and make cancellation safe.
+Preserve focus trapping
+and return focus, prevent horizontal overflow, show no internal IDs, and put
+secondary dismissal last at the lower-right footer. No header X or new library
+by default. BOM line removal now uses the shared native adapter in
+solar-ui/src/app/shared/ktui-confirmation.ts, with Confirm removal on the left
+and Keep line as the lower-right secondary dismissal. Business writes run only
+after a positive result and current account/project checks; cancel/escape/backdrop
+and route changes do not remove a line. Undo is unchanged. Twenty focused tests
+(including the actual installed KTModal, not a mock) and the production build
+pass. The existing initial-bundle warning remains; no budget was changed.
+Live browser verification (2026-10-13) passed on an existing account BOM in
+the default light-theme viewport and a temporary 390px mobile viewport (355 CSS
+pixels under the user's zoom). The real KTUI modal shows public 2px corners and
+Space Grotesk headings, no header close control, and Keep line at the lower-right
+footer. Document and dialog/nested widths have no horizontal overflow. Tab and
+Shift+Tab stay within the dialog; Keep line and Escape cancel and restore focus
+to Remove. The original item and quantity remained unchanged; Confirm removal
+was not submitted. The viewport override was reset. Dark-mode visual verification
+was not performed in this follow-up. No source code changed or tests were rerun.
+Existing inline confirmations are migration debt, not approved patterns. This
+guideline does not claim that other confirmations have been migrated or verified.
+
+## Required markers and Add icons (2026-10-13)
+
+All customer and admin forms use a red asterisk (.solar-required-marker) for
+actual required fields, including conditional requirements. Required BOM slots
+use the same marker; optional labels/slots are unmarked. Do not print parenthetic
+required/optional labels or separate Required/Optional captions. Native required
+or aria-required and accessible non-form hints preserve the meaning independently
+of color. Draft validation and publish-only prerequisites remain distinct.
+
+All Add/New/Create controls use ki-outline ki-plus (verified outline mapping
+\ea9e against the matching Metronic 9.2 font). This includes Cart/project additions
+and repeated-component actions. Save/Confirm use checks; a shared Add/Save editor
+binds the icon to its mode. Cart/project navigation still uses handcart/clipboard.
+These conventions supersede historical Add-action glyphs below and in older skill
+examples. Keep hover-only tooltips, labels and existing guards unchanged.
+
+## Table actions and primary-button budget
+
+Main-table row actions and responsive card equivalents are secondary icon-only
+controls with verified KeenIcons, shared hover-only tooltips, native titles and
+record-specific accessible names. Operation dropdown triggers follow this rule;
+menu entries keep their readable labels. Keep page-level actions labeled.
+
+Grouped table actions use an action icon plus a smaller downward chevron in the
+shared kt-btn-grouped-action button; single actions remain one icon. Inventory
+uses cube-2 (ki-cube-2) + chevron for Quantity operations and horizontal
+ellipsis (ki-dots-horizontal) + chevron for Other operations. These are KeenIcons
+equivalents, not Lucide; no additional icon library is installed. The outline
+mapping is verified from local Metronic 9.2: cube-2 is U+E9B8 and dots-horizontal
+is U+E9D9, with a matching bundled outline WOFF. Keep icons decorative and retain
+the named, guarded menu trigger and hover-only tooltips.
+
+There is a maximum of one primary-colored button per page, and zero is valid.
+Do not assign primary styling to every row/card. /admin/inventory deliberately
+uses no primary-colored buttons, including its forms and operation dialogs.
+These current requirements supersede historical per-card primary styling below.
+
+## Page copy and section spacing
+
+### No horizontal scrollbars — mandatory
+
+No page or nested UI region may require horizontal scrolling, including tables,
+cards, filter/action toolbars and dialogs/popups. This applies to customer and
+admin screens, narrow viewports and browser zoom. Vertical scrolling is allowed.
+
+Reflow columns, wrap text/actions, stack rows into labeled cards, or show a compact
+summary with accessible details when content cannot fit. Preserve meaningful
+data and keyboard access; long product names, SKUs and IDs must wrap. Do not
+solve overflow by hiding scrollbars, clipping content or shrinking text until
+unreadable. Avoid overflow-x-auto/scroll and oversized fixed/min-width tables.
+
+Verify that document and nested regions have no horizontal overflow at desktop,
+mobile and zoomed layouts, including long values, loading/error states and open
+dialogs. This rule supersedes older horizontally scrollable table examples;
+those implementations are pending remediation, not approved patterns.
+
+Pages, dialogs, progress messages and toasts describe tasks, outcomes and useful
+business constraints, not the implementation. Do not explain API-side filtering,
+request caps, indexes, cursors, pagination strategy, atomic transactions or
+optimistic concurrency versions to operators. Keep those contracts in docs.
+This does not remove product technical specifications, permission explanations,
+audit references, stock uncertainty or required confirmation warnings.
+Page numbers, page sizes, Previous/Next and truthful empty states remain.
+
+Use padded card headers (normally px-5 py-4), explicit 12–16px gaps and a separate
+p-5 filter toolbar. Keep Clear filters compact and aligned with controls in the
+same toolbar; allow responsive wrapping without page overflow. Minimum height
+alone does not provide breathing room above/below multiline header content.
+Let long location titles wrap, with space between the title and action.
+
+Inventory headers now use explicit vertical padding and omit filter/export
+implementation notes. Export progress reports products collected; oversized
+exports give a plain-language action and confirm no file was downloaded.
+The underlying API filters, pagination, export caps and no-partial-file rules
+are unchanged.
+
+## Product image enlargement
+
+Actual product photos use a shared keyboard-accessible click-to-expand lightbox.
+Reuse the main solar site's ng-gallery 12 photo renderer in a CDK dialog with the
+existing semantic palette and KTUI secondary controls, not another image library
+or a hand-written slider. Close is only in the lower-right footer; images are
+contained within the viewport without sideways scrolling. Public overlays keep
+green/dark tokens and 2px corners; admin overlays retain blue styling. Placeholder
+artwork is not clickable. See docs/PRODUCT-IMAGES.md for the read-only boundary,
+lazy loading, lifecycle handling and verification limits.
+
+## Customer project management
+
+Current BOM component table (2026-10-13) uses the real shared KTUI renderer with
+no standalone Reload / retry BOM button. Initial route/account loading remains
+automatic; failures expose a secondary Retry within the page-level error panel.
+Busy/loading guards and existing safe reload behavior remain unchanged.
+The table retains its
+PC-part-picker-like component, selection, quantity, unit-price, subtotal and
+action columns. Add inverter/Add battery/category buttons keep visible labels as
+requested; row edits/details/removal use secondary icon-only KeenIcons/tooltips.
+Public green/mint tokens, fonts and 2px corners are unchanged. Container reflow
+accounts for the customer sidebar and zoom; empty mobile slots omit nonexistent
+quantity/price/action cells. Picker Close stays in the lower-right footer.
+All component Add actions use explicit populated wording: Add another inverter,
+Add more panels, Add another battery, Add more mounting, Add more protection and
+Add another requirement. Empty groups retain their initial Add labels; removing
+the last line restores them. Group presence includes explicitly categorized free
+text and is independent of export checkboxes and quantity.
+Component Add buttons grow with wrapped labels, retaining explicit vertical
+padding and readable line spacing rather than KTUI's fixed compact height.
+Stacked BOM cells omit redundant Component/Selection/Quantity/Actions headings,
+keeping the actual quantity form label and Unit price/Subtotal labels. Resolved
+product rows no longer repeat published-price/tax or availability notices.
+Add free-text line now lives inside the component picker; no duplicate main-page
+button. It switches the same customer-themed dialog to the existing editor with
+component context. The editor has a vertically scrolling body and footer-only
+Add/Save followed by lower-right Cancel, with no header close button or technical
+prototype notices. Empty Other requirements uses Add requirement.
+See [component policy and verification](docs/BOM-COMPONENTS.md).
+
+My projects and its details editor reuse the /catalog green/mint semantic tokens,
+Space Grotesk/DM Sans, 2px KTUI surfaces, verified KeenIcons and shared CDK overlays.
+The list has one wrapping API-filter toolbar with compact hover-only Clear, and
+10-record Previous/Next cursor pages. New project remains available in all list
+states. Metadata editing and lifecycle outcomes use the existing KTUI ToastService;
+archived project details/BOMs are read-only. No vendor styling, theme package or
+blue administration appearance changed. Current ownership and query behavior is
+documented in [account Projects](docs/ACCOUNT-PROJECTS.md); older preview-only
+implementation notes below are historical. Browser visual checks remain separate
+from component tests/builds.
+
+## Physical inventory administration
+
+/admin/inventory uses administration's blue KTUI controls and existing KeenIcons.
+Filters and compact icon-only Clear share a responsive toolbar row. Inventory
+locations, product rows and movement history are API-paged; no sample warehouse
+balances or loaded-page totals imply real stock. Unknown stock is distinct from
+an explicitly counted zero. Destructive signed adjustments require confirmation,
+and location/stock saves use shared success/error toasts. Movement history is
+read-only. Customer green/mint styling remains unchanged.
+The product table uses 10 rows per API page, with a visible Page N / 10 per page
+footer and secondary Previous/Next controls. Page changes replace rows rather
+than append them; use disabled/loading states and no guessed global totals.
+Movement history uses a shared CDK popup in the blue administration theme,
+with a viewport-bounded scrollable body and visible 5-per-page Previous/Next
+footer. Retain read-only ledger details, Escape/backdrop/Close dismissal,
+focus containment/return and accessible product/location context.
+Physical counts and transfers use blue review/confirmation popups that show
+before/after quantities, fixed units and reasons. Unknown destinations require
+an explicit count, not a guessed zero. Threshold configuration preserves unset
+versus zero; stock badges pair color with readable status text. Stock-status
+filter and compact Clear remain on the filter toolbar. Sparse empty API segments
+with a continuation offer Next and never claim the entire query has no matches.
+Balance/history CSV controls show plain-language progress/cancellation and
+actionable failures, and never deliver partial files after failure. Request caps
+and live-read limitations are recorded in implementation docs, not page copy.
+Do not imply reservations, supplier stock or valuation are implemented.
+
 ## Agreed direction
 
 Use the same Metronic/KTUI theme foundation as the Provia project. The Google
@@ -48,6 +292,15 @@ it is not the source for the requested Metronic/KTUI foundation.
 
 ## Component use
 
+Supplier filter update (2026-10-09): /admin/suppliers now uses bounded API-side
+case-sensitive name-prefix and active/inactive filters, not loaded-card search.
+Its Clear action stays compact in the shared KTUI toolbar row, with the existing
+verified cross glyph, accessible label and hover-only arrow tooltip. Blue admin
+tokens/radii and responsive field wrapping are unchanged. Current frontend
+production build and all 337 tests / 47 files pass; 18 focused supplier/admin
+tests pass. Real browser visual/clipboard/mobile verification remains pending
+because the browser connection failed before observation.
+
 ### Table filter toolbars
 
 Keep Clear filters on the same toolbar row as the filters, aligned to input/select
@@ -59,7 +312,7 @@ part of their toolbar. /admin/products follows this layout.
 All table filtering/search must be API-side before pagination, not a filter over
 loaded rows. This is a required guideline, not a claim that older tables already
 comply. See AGENTS.md's Table filtering guidelines and the migration status in
-[admin product management](docs/ADMIN-PRODUCT-MANAGEMENT-PLAN.md).
+[admin product management](plans/ADMIN-PRODUCT-MANAGEMENT-PLAN.md).
 
 ### Operation feedback
 
@@ -76,7 +329,9 @@ Shared styles use semantic light/dark tokens and cap the visible width on mobile
 no vendor edits, notification package or new backend service is required.
 Verified 34 focused toast/admin tests, app/spec type checks and production build.
 The full run preceding the extra passing navigation-failure test had 290 passing
-tests and the same 9 pre-existing project/Auth failures. Browser visual checks
+tests and the same 9 pre-existing project/Auth failures (historical). The
+2026-10-09 management slice resolves them: 328 complete-suite tests and build pass.
+Supplier editing/status uses the same blue KTUI feedback conventions. Browser visual checks
 remain pending because the helper could not initialize during the preceding task.
 
 Use [solar-customer-theme](.agents/skills/solar-customer-theme/SKILL.md) when
@@ -104,7 +359,7 @@ Apply the Demo 1 navigation shell to administration only. Shopping and customer
 My pages use separate shells while sharing the public tokens and component
 treatments. Preserve the solar branding and multi-supplier workflows.
 
-The [user-facing roadmap](docs/USER-FACING-PLAN.md) separates a sidebar-free
+The [user-facing roadmap](plans/USER-FACING-PLAN.md) separates a sidebar-free
 shopping shell from a dedicated green customer My pages shell. The main working
 tree implements this separation. The projects page now has a bounded browser-local
 preview list, creation wizard entry, and overview; it uses synthetic local ownership
@@ -256,7 +511,7 @@ page-level actions retain their labels.
 
 The public guest equipment list is now named Cart across shopping navigation,
 the `/draft` page, history/linking dialogs, sign-in copy and notifications. Cart
-actions and navigation use the verified `ki-handcart` outline glyph (`\ea37`),
+navigation uses the verified `ki-handcart` outline glyph (`\ea37`),
 from Metronic 9.2 with a SHA256-identical font already bundled in this application.
 This is presentation only: `/draft`, `/bom` redirects, storage keys, quantities,
 one-time project copying and CSV behavior stay compatible. A Cart is not a

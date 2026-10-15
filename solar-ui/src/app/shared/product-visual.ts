@@ -1,13 +1,18 @@
 import { Component, input } from '@angular/core';
 import { ProductVisual } from '../core/models';
 import type { ProductImage } from '../core/product-images';
+import { ProductLightboxDirective } from './product-lightbox';
 
 @Component({
   selector: 'app-product-visual',
+  imports: [ProductLightboxDirective],
   host: { class: 'block' },
   template: `
     @if (images()?.[imageIndex()]; as image) {
-      <img class="h-full w-full object-contain" [src]="variant() === 'thumb' ? image.thumbnailUrl : image.url" [alt]="alt()" loading="lazy" />
+      <button type="button" class="solar-product-image-trigger h-full w-full" [productLightbox]="images()"
+        [lightboxIndex]="imageIndex()" [lightboxLabel]="alt()" [attr.aria-label]="'Enlarge ' + alt()" [attr.title]="'Enlarge ' + alt()">
+        <img class="h-full w-full object-contain" [src]="variant() === 'thumb' ? image.thumbnailUrl : image.url" [alt]="alt()" loading="lazy" />
+      </button>
     } @else {
     <svg viewBox="0 0 260 170" class="h-full w-full" aria-hidden="true">
       <ellipse cx="130" cy="145" rx="75" ry="9" fill="currentColor" opacity=".06"/>

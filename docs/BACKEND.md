@@ -1,5 +1,27 @@
 # Backend bootstrap
 
+Customer Projects update (2026-10-09): authenticated owner-scoped management now
+supports details editing, atomic archive/active clearing, restore and retry-safe
+mixed-BOM duplication. Project lists validate name/location search and enum
+filters before pagination; the customer list requests 10 records and preserves
+bounded sparse-segment continuations. See [account Projects](ACCOUNT-PROJECTS.md)
+for endpoint shapes, concurrency, ownership, cost budgets and deferred PO policy.
+No new database/service, cloud index deployment, rules/IAM or live data migration
+is included.
+
+Inventory foundation (2026-10-09): physical location/balance/movement APIs are
+implemented separately from catalog writes. See
+[inventory management](INVENTORY-MANAGEMENT.md) for transactions, API contracts,
+private access, read/write costs, count/transfer/threshold/export operations and
+deferred PO/public-stock work.
+
+Current update (2026-10-09): supplier lists now support server-side name-prefix
+and status filters before pagination. Connected /ready replaces the historical
+placeholder below: 200 means bounded read probes succeeded; 503 means disabled,
+failed or timed out. See [readiness contract](CONNECTED-READINESS.md) and
+[admin catalog management](ADMIN-CATALOG-MANAGEMENT.md). Local servers and
+direct/proxied catalog checks are verified; this is not production deployment.
+
 Local activation update (2026-10-07): temporary existing Google-only Auth usage,
 local API activation and Mark-only bootstrap are now human-approved. Defaults
 remain disabled; the approved running process supplies its flags/ADC privately.
@@ -29,7 +51,9 @@ The Node.js/TypeScript Fastify API is bootstrapped under `backend/` and has its 
 
 Install the backend dependencies with `npm ci --prefix backend`.
 
-The server binds to loopback at `127.0.0.1:4400` by default. `GET /health` reports process status only. `GET /ready` deliberately returns `503 BACKEND_NOT_READY`: live activation and connected readiness probes remain pending. A healthy process returning `200` from `/health` does not establish cloud readiness.
+The server binds to loopback at 127.0.0.1:4400 by default. GET /health reports
+process status only. GET /ready now performs cached dependency probes as recorded
+above; a healthy process alone does not establish connected readiness.
 
 `GET /api/v1/me` is protected by a Firebase bearer ID token. `GET` and `PUT /api/v1/me/profile` use the same verified identity to select one customer-profile document in `store-dev`. All protected routes return `503` while the Firebase backend feature is disabled. There is no product/project/PO CRUD API or `/admin` endpoint.
 
@@ -107,10 +131,18 @@ The proposed next business slice is catalog CRUD with a public read projection. 
 
 ## Related project documentation
 
+Private inventory operations now include actual counts, atomic linked location
+transfers, versioned thresholds, server-owned stock-status filtering and bounded
+CSV reads. The admin API checks verified authorization before parsing every new
+row/count/transfer/settings endpoint; transactions enforce pool/product versions,
+idempotency, fixed units and nonnegative balances. PO commitments remain disabled
+until status and inbound/outbound policy are finalized. See
+[physical inventory contracts and costs](INVENTORY-MANAGEMENT.md).
+
 - [Infrastructure](INFRASTRUCTURE.md)
 - [Authentication](AUTHENTICATION.md)
-- [User-facing plan](USER-FACING-PLAN.md)
-- [Admin product-management plan](ADMIN-PRODUCT-MANAGEMENT-PLAN.md)
+- [User-facing plan](../plans/USER-FACING-PLAN.md)
+- [Admin product-management plan](../plans/ADMIN-PRODUCT-MANAGEMENT-PLAN.md)
 
 ## Official Firebase references
 

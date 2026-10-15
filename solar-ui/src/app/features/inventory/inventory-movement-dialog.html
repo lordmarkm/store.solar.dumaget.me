@@ -1,0 +1,59 @@
+<section class="flex max-h-[calc(100dvh-32px)] min-h-0 flex-col bg-card text-foreground" aria-labelledby="inventory-history-title">
+  <header class="shrink-0 border-b border-border px-5 py-4 sm:px-6">
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <p class="eyebrow mb-2">{{ data.product.sku }} · {{ data.location.code }}</p>
+        <h2 id="inventory-history-title" class="text-xl font-semibold">Movement history</h2>
+        <p class="mt-1 text-sm text-secondary-foreground">{{ data.product.name }} · {{ data.location.name }}</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-5 py-3 sm:px-6">
+    @if (!data.exporting()) { <button type="button" class="kt-btn kt-btn-light kt-btn-sm" (click)="data.exportAll()">Export history</button> }
+    @else { <button type="button" class="kt-btn kt-btn-light kt-btn-sm" (click)="data.cancelExport()">Cancel export</button><span class="text-xs text-secondary-foreground" role="status">Preparing history export…</span> }
+    @if (data.exportError()) { <p class="w-full text-sm text-destructive" role="alert">{{ data.exportError() }}</p> }
+  </div>
+
+  <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6" role="region" aria-label="Inventory movement records" tabindex="0">
+    @if (data.error()) {
+      <div class="flex flex-wrap items-center gap-3" role="alert">
+        <p class="text-sm text-destructive">{{ data.error() }}</p>
+        <button type="button" class="kt-btn kt-btn-light kt-btn-sm" (click)="data.retry()" [disabled]="data.loading()">Retry this page</button>
+      </div>
+    }
+    @if (data.movements().length) {
+      <div class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
+        @for (move of data.movements(); track move.id) {
+          <article class="min-w-0 rounded-lg border border-border p-4 text-xs">
+            <div class="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,12rem),1fr))] gap-x-4 gap-y-3">
+              <div class="min-w-0"><p class="text-secondary-foreground">Version</p><p class="mt-1 break-words">{{ move.version }}</p></div>
+              <div class="min-w-0"><p class="text-secondary-foreground">Kind</p><p class="mt-1 break-words">{{ move.kind }}</p>
+                @if (move.otherLocationId) { <p class="mt-1 break-words text-secondary-foreground">{{ move.kind === 'transfer-out' ? 'To' : 'From' }} location: {{ otherLocationName(move.otherLocationId) }}</p> }
+              </div>
+              <div class="min-w-0"><p class="text-secondary-foreground">Quantity</p><p class="mt-1 break-words">{{ move.quantity | number }} {{ move.unitCode }}</p></div>
+              <div class="min-w-0"><p class="text-secondary-foreground">Change</p><p class="mt-1 break-words">{{ move.delta > 0 ? '+' : '' }}{{ move.delta | number }} {{ move.unitCode }}</p></div>
+              <div class="min-w-0"><p class="text-secondary-foreground">Balance before → after</p><p class="mt-1 break-words">{{ move.onHandBefore === null ? '—' : (move.onHandBefore | number) }} → {{ move.onHandAfter | number }} {{ move.unitCode }}</p></div>
+              <div class="min-w-0"><p class="text-secondary-foreground">Reason</p><p class="mt-1 whitespace-pre-wrap break-words">{{ move.reason }}</p></div>
+              <div class="min-w-0"><p class="text-secondary-foreground">Actor</p><p class="mt-1 break-words">{{ move.actorName && move.actorName !== move.actorUid ? move.actorName : 'Name unavailable' }}</p></div>
+              <div class="min-w-0"><p class="text-secondary-foreground">Observed</p><p class="mt-1 break-words">{{ move.observedAt | date:'medium' }}</p></div>
+              <div class="min-w-0"><p class="text-secondary-foreground">Recorded</p><p class="mt-1 break-words">{{ move.createdAt | date:'medium' }}</p></div>
+            </div>
+          </article>
+        }
+      </div>
+    } @else if (!data.loading() && !data.error()) {
+      <p class="py-8 text-center text-sm text-secondary-foreground">No movements recorded yet.</p>
+    }
+    @if (data.loading()) { <p class="py-4 text-center text-sm text-secondary-foreground" role="status" aria-live="polite">Loading movement history…</p> }
+  </div>
+
+  <footer class="flex shrink-0 flex-col gap-3 border-t border-border px-5 py-4 sm:flex-row sm:items-center sm:px-6">
+    <div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3">
+      <button type="button" class="kt-btn kt-btn-light" (click)="data.previous()" [disabled]="data.page() === 1 || data.loading()">Previous</button>
+      <span class="text-xs text-secondary-foreground" aria-live="polite">Page {{ data.page() }} · 5 per page</span>
+      <button type="button" class="kt-btn kt-btn-light" (click)="data.next()" [disabled]="!data.cursor() || data.loading()">Next</button>
+    </div>
+    <button type="button" class="kt-btn kt-btn-light shrink-0 self-end sm:self-center" (click)="ref.close()">Close</button>
+  </footer>
+</section>

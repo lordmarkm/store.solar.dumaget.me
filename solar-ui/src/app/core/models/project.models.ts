@@ -45,6 +45,29 @@ export type ManualEstimate =
   | { readonly kind: 'unpriced' }
   | { readonly kind: 'manual-estimate'; readonly unitPrice: Money; readonly taxTreatment: 'unspecified' };
 
+export const BOM_COMPONENT_CATEGORIES = ['Inverters', 'Panels', 'Batteries', 'Mounting', 'Circuit breakers', 'Surge Protection Device', 'ATS', 'PV Isolator', 'MCCB'] as const;
+/** Protection exists only to retain legacy BOM metadata; never offered as a choice. */
+export type BomComponentCategory = typeof BOM_COMPONENT_CATEGORIES[number] | 'Protection' | 'Other';
+export function isBomComponentCategory(value: unknown): value is BomComponentCategory {
+  return typeof value === 'string' && ((BOM_COMPONENT_CATEGORIES as readonly string[]).includes(value) || value === 'Protection' || value === 'Other');
+}
+export const BOM_COMPONENT_PROTECTION_TYPES = ['ATS'] as const;
+export type BomComponentProtectionType = typeof BOM_COMPONENT_PROTECTION_TYPES[number];
+export function isBomComponentProtectionType(value: unknown): value is BomComponentProtectionType {
+  return typeof value === 'string' && (BOM_COMPONENT_PROTECTION_TYPES as readonly string[]).includes(value);
+}
+export function isValidFreeTextProtectionMetadata(value: {
+  readonly componentCategory?: unknown;
+  readonly componentProtectionType?: unknown;
+  readonly amperage?: unknown;
+}): boolean {
+  if (value.componentCategory !== undefined && !isBomComponentCategory(value.componentCategory)) return false;
+  if (value.componentProtectionType === undefined && value.componentCategory !== 'ATS') return value.amperage === undefined;
+  return value.componentProtectionType === 'ATS' && (value.componentCategory === 'ATS' || value.componentCategory === 'Protection')
+    && typeof value.amperage === 'number' && Number.isFinite(value.amperage) && value.amperage > 0
+    && value.amperage <= Number.MAX_SAFE_INTEGER;
+}
+
 interface BomItemBase {
   readonly id: EntityId;
   readonly quantity: number;
@@ -60,6 +83,10 @@ export interface StoreProductBomItem extends BomItemBase {
 
 export interface FreeTextBomItem extends BomItemBase {
   readonly kind: 'free-text';
+  /** Explicit user-selected grouping only; omitted legacy lines remain Other requirements. */
+  readonly componentCategory?: BomComponentCategory;
+  readonly componentProtectionType?: BomComponentProtectionType;
+  readonly amperage?: number;
   readonly title: string;
   readonly description: string;
   readonly unit: string;

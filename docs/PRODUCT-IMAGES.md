@@ -33,6 +33,13 @@ delivery design rather than assuming that unpublishing revokes image URLs.
 
 ## Upload workflow
 
+UI copy decision, 2026-10-12: the shared public image notice is removed from
+New product and Edit product. Do not add storage/public-access/cache/retention
+notices unless the user explicitly requests them; maintain these explanations
+in this document. File constraints, paste guidance and actionable upload errors
+remain. This copy change does not change bucket access, upload authorization,
+cleanup/retention safeguards or publication requirements.
+
 Admin New product and Edit product have a reusable picture field. Choose a file,
 or focus its paste area and press Ctrl+V with an image copied to the clipboard.
 The ordinary paste event supplies clipboard image data; no persistent Clipboard
@@ -60,7 +67,60 @@ Customer cards and compact Cart/BOM rows use thumbnails. Product details show
 the full-size picture with selectable gallery thumbnails. Public views retain
 the green/mint angular-card theme; administration retains its blue theme.
 
-## API and model
+## Read-only image lightbox (2026-10-12)
+
+Actual product photos expand on click or native button keyboard activation.
+The connected /admin/products KTUI Product column includes a compact thumbnail
+button using the same directive, all product photos and the full-size viewer.
+Records without photos retain their name/SKU without a fake clickable image.
+The shared ProductVisualComponent enables this in inventory, catalog, Cart,
+project BOM rows and product details; ProductImageUploader enables it for saved
+and unsaved uploaded editor previews. Illustrative SVG fallbacks are not actions.
+Existing detail-gallery thumbnails still select a photo; clicking that main photo
+opens the viewer at the selected index. No catalog or inventory write is made.
+
+Reuse ng-gallery 12.0.0, the exact package/version in the main solar site, for
+photo rendering, loading, aspect-ratio containment and item navigation. The
+store wraps GalleryComponent in its existing CDK dialog rather than using the
+vendor Lightbox's default dismissal layout: Close must stay visible in the footer
+at the lower right, with no top-right X. Previous/Next image controls are secondary
+KTUI buttons; Left/Right keys call the library's navigation API. All photos use
+their existing full-size detail URLs, not enlarged thumbnail URLs.
+
+Implementation: solar-ui/src/app/shared/product-lightbox.ts (shared directive),
+product-image-lightbox.ts (library viewer), product-visual.ts and
+product-image-uploader.ts (native button triggers), with responsive styles in
+solar-ui/src/styles.css. The viewer loads only on activation. The matching
+@angular/animations 21.2.8 dependency is required by ng-gallery 12's legacy
+animation metadata; app.config.ts lazily provides its no-motion renderer. Do not
+upgrade Angular or edit vendor files to remove that compatibility dependency.
+
+The directive copies the clicked image descriptors/index before loading, prevents
+duplicate opens and closes its owned viewer when the trigger is destroyed. A
+destroyed trigger cannot open a late-loaded viewer. CDK supplies focus containment,
+Escape/backdrop dismissal and focus return, including when opened over product
+details. Load failures are actionable errors, not storage-policy notices. Public
+green/dark tokens and 2px panel corners inherit from the root theme; admin retains
+blue and its existing geometry. Images fit the viewport without horizontal
+scrollbars; navigation is through controls, not a sideways scrolling photo strip.
+
+Test scope: directive/viewer boundary tests use a gallery double because ng-gallery
+12's unlinked partial declarations fail to initialize in the Vitest external/JIT
+environment (GalleryItemComponent temporal-dead-zone error). Production builds
+and the real browser viewer remain separate evidence; do not present mocked tests
+as real vendor-renderer integration. Multi-image live browser verification requires
+a suitable existing record and remains separate from navigation unit coverage.
+
+Verification: 29 focused tests (lightbox, visual, uploader, details and KTUI table),
+test-source TypeScript and production build pass. The build retains a small initial
+bundle warning (758.49 kB / 750 kB warning budget). Real browser checks confirm
+single-photo inventory expansion/full-size image loading at desktop and 390px
+mobile override (341 CSS px under current zoom), no horizontal overflow, footer
+reachability and Escape/focus return. Public light/dark tokens and nested details
+focus/dismissal are verified. No live records, images or stock were written;
+normal viewport and original light preference were restored.
+
+## API and model contract
 
 POST /api/v1/admin/product-images accepts the raw image bytes and matching
 Content-Type. Authentication runs before buffering/decoding. Image bodies are
@@ -146,13 +206,20 @@ References:
 
 ## Verification
 
-Backend type checks, build and 69 unit/API tests pass. Frontend app/spec type
-checks, production build and 68 focused image/catalog/API/editor/dialog tests pass.
+Current 2026-10-09: backend checks/build and 75 unit/API tests pass; complete
+frontend suite 328 tests across 46 files and production build pass. New isolated
+management integration checks use real emulator transactions and synthetic GCS
+objects only. Seven product-filter indexes are READY; live read-only queries pass.
+Manual account/clipboard/visual confirmation remains pending.
+
+Historical image-slice results (2026-10-08): backend type checks, build and 69
+unit/API tests passed. Frontend app/spec checks, production build and 68 focused
+image/catalog/API/editor/dialog tests passed.
 Synthetic clipboard-event tests cover image paste, ordinary text paste, failures,
 session changes and six-file host-binding updates. Gallery selection is covered.
 The preceding full frontend run had 282 passing tests and the same 9 existing
 project/Auth-flow failures; it preceded the additional passing gallery test.
-Do not describe the entire frontend suite as passing.
+Those failures were subsequently resolved in the 2026-10-09 management slice.
 
 Isolated Firestore emulator image lifecycle and publication checks pass, including
 create/publish/reload, idempotent retries, private edits, omitted-image preservation,

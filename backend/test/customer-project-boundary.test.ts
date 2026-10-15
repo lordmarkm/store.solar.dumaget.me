@@ -41,6 +41,30 @@ test('project planning allows above-stock safe whole quantities only and bounded
   assert.throws(() => parseCreateProject({ requestId, details, items: [{ ...item, product: { ...item.product, variantId: 'unsupported' } }] }));
 });
 
+test('every BOM quantity entry point rejects non-positive, fractional, and unsafe quantities', () => {
+  const common = { requestId, expectedVersion: 1 };
+  const textInput = { title: 'Labor', description: '', unit: 'job', quantity: 1, notes: '' };
+  const invalid = [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1];
+  const guestPayload = (quantity: number) => {
+    const copiedItem = { id: 'guest-item-a', kind: 'store-product', product: item.product, quantity };
+    return { listId: 'guest-a', itemIds: ['guest-item-a'], fingerprint: JSON.stringify({ id: 'guest-a', state: 'unlinked', items: [copiedItem] }) };
+  };
+
+  for (const quantity of invalid) {
+    const productItem = { ...item, quantity };
+    assert.throws(() => parseCreateProject({ requestId, details, items: [productItem] }), `initial item: ${quantity}`);
+    assert.throws(() => parseCreateProject({ requestId, details, items: [productItem], guest: guestPayload(quantity) }), `initial cart copy: ${quantity}`);
+    assert.throws(() => parseProjectCommand({ ...common, action: 'add-items', items: [productItem] }), `add-items: ${quantity}`);
+    assert.throws(() => parseProjectCommand({ ...common, action: 'add-items', items: [productItem], guest: guestPayload(quantity) }), `cart copy: ${quantity}`);
+    assert.throws(() => parseProjectCommand({ ...common, action: 'free-text', input: { ...textInput, quantity } }), `free-text: ${quantity}`);
+    assert.throws(() => parseProjectCommand({ ...common, action: 'quantity', itemId: lineId, quantity }), `quantity edit: ${quantity}`);
+  }
+
+  const maximumQuantity = parseProjectCommand({ ...common, action: 'quantity', itemId: lineId, quantity: Number.MAX_SAFE_INTEGER });
+  assert.equal(maximumQuantity.action, 'quantity');
+  if (maximumQuantity.action === 'quantity') assert.equal(maximumQuantity.quantity, Number.MAX_SAFE_INTEGER);
+});
+
 test('guest review requires all item identities and matching content, not a fabricated fingerprint', () => {
   const guestItem = { id: 'guest-item-a', kind: 'store-product', ...item };
   const fingerprint = JSON.stringify({ id: 'guest-a', state: 'unlinked', items: [guestItem] });

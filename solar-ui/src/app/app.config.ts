@@ -1,4 +1,5 @@
 import { ApplicationConfig, inject } from '@angular/core';
+import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { provideRouter, withInMemoryScrolling } from '@angular/router';
 import { routes } from './app.routes';
 import { AUTH_DRIVER, AuthSessionService } from './core/auth-session.service';
@@ -11,6 +12,9 @@ import { ACCOUNT_PROJECT_STORE, AccountProjectService } from './core/account-pro
 
 export const appConfig: ApplicationConfig = {
   providers: [
+    // ng-gallery 12 (shared with the main site) uses legacy animation triggers.
+    // Load its compatibility renderer only when needed and disable motion.
+    provideAnimationsAsync('noop'),
     provideRouter(routes, withInMemoryScrolling({ scrollPositionRestoration: 'enabled', anchorScrolling: 'enabled' })),
     { provide: AUTH_DRIVER, useFactory: () => STOREFRONT_AUTH_ENABLED ? createFirebaseAuthDriver() : null },
     { provide: CUSTOMER_SESSION, useFactory: () => inject(AuthSessionService).session },

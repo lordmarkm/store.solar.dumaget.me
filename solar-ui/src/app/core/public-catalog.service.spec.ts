@@ -10,6 +10,53 @@ describe('public catalog boundaries', () => {
   const fetcher = vi.fn<typeof fetch>();
   beforeEach(() => { fetcher.mockReset(); TestBed.configureTestingModule({ providers: [{ provide: STORE_API_FETCH, useValue: fetcher }] }); });
   afterEach(() => vi.useRealTimers());
+  it.each(['PV Isolator', 'MCCB'] as const)('requests a filtered picker page for %s without MCB/ATS ratings', async category => {
+    const source = TestBed.inject(PublicCatalogService);
+    fetcher.mockResolvedValueOnce(json({ items: [{ ...value, category }], nextCursor: null }));
+    expect((await source.categoryPage(category)).items[0].category).toBe(category);
+    const params = new URL(String(fetcher.mock.calls.at(-1)?.[0]), 'https://store.example').searchParams;
+    expect(Object.fromEntries(params)).toEqual({ category, limit: '10' });
+    expect(publishedView(parsePublishedProduct({ ...value, category })).category).toBe(category);
+  });
+  it('requests a category-filtered ten-item picker page without replacing storefront data', async () => {
+    const source = TestBed.inject(PublicCatalogService);
+    fetcher.mockResolvedValueOnce(json({ items: [value], nextCursor: null }));
+    await source.refresh();
+    const items = Array.from({ length: 10 }, (_, index) => ({ ...value, id: `11111111-1111-4111-8111-${String(index).padStart(12, '0')}` }));
+    fetcher.mockResolvedValueOnce(json({ items, nextCursor: 'scoped_cursor' }));
+    const page = await source.categoryPage('Panels');
+    expect(page.items).toHaveLength(10);
+    expect(page.nextCursor).toBe('scoped_cursor');
+    expect(fetcher.mock.calls.at(-1)?.[0]).toBe('/api/v1/catalog/products?category=Panels&limit=10');
+    expect(source.items()).toHaveLength(1);
+    fetcher.mockResolvedValueOnce(json({ items: [], nextCursor: null }));
+    await source.categoryPage('Panels', page.nextCursor);
+    expect(fetcher.mock.calls.at(-1)?.[0]).toBe('/api/v1/catalog/products?category=Panels&limit=10&cursor=scoped_cursor');
+  });
+  it('requests API-side ATS filtering and rejects other Protection subtypes', async () => {
+    const source = TestBed.inject(PublicCatalogService);
+    const ats = { ...value, category: 'ATS', protectionType: 'ATS', atsSpecifications: { amperage: 63 } };
+    fetcher.mockResolvedValueOnce(json({ items: [ats], nextCursor: null }));
+    expect((await source.categoryPage('ATS', null, 'ATS')).items[0].atsSpecifications?.amperage).toBe(63);
+    expect(fetcher.mock.calls.at(-1)?.[0]).toBe('/api/v1/catalog/products?category=ATS&limit=10');
+    fetcher.mockResolvedValueOnce(json({ items: [{ ...value, category: 'ATS' }], nextCursor: null }));
+    await expect(source.categoryPage('ATS', null, 'ATS')).rejects.toThrow();
+    await expect(source.categoryPage('Panels', null, 'ATS')).rejects.toThrow();
+    fetcher.mockResolvedValueOnce(json({ items: [], nextCursor: null }));
+    await source.categoryPage('ATS', 'ats_cursor', 'ATS');
+    expect(fetcher.mock.calls.at(-1)?.[0]).toContain('category=ATS&limit=10&cursor=ats_cursor');
+  });
+  it('rejects wrong-category, private, unsorted and oversized picker pages', async () => {
+    const source = TestBed.inject(PublicCatalogService);
+    for (const items of [[value], [{ ...value, category: 'Batteries', supplierId: id }],
+      Array.from({ length: 11 }, () => ({ ...value, category: 'Batteries' }))]) {
+      fetcher.mockResolvedValueOnce(json({ items, nextCursor: null }));
+      await expect(source.categoryPage('Batteries')).rejects.toThrow();
+    }
+    fetcher.mockResolvedValueOnce(json({ items: [value], nextCursor: 'cursor' }));
+    await expect(source.categoryPage('Panels')).rejects.toThrow();
+    await expect(source.categoryPage('Panels', 'bad cursor')).rejects.toThrow();
+  });
   it('validates exact public fields without private metadata and preserves centavos and zero', () => {
     expect(publishedView(parsePublishedProduct(value)).price).toBe(6450.5);
     expect(publishedView(parsePublishedProduct({ ...value, amountMinor: 0 })).price).toBe(0);
@@ -18,6 +65,28 @@ describe('public catalog boundaries', () => {
     for (const change of [{ supplierId: id }, { createdBy: 'admin' }, { stock: 100 }, { brand: '' }, { amountMinor: null }, { amountMinor: -1 }, { amountMinor: 0.1 }, { version: 0 }, { publishedAt: '2026-02-30T00:00:00.000Z' }]) {
       expect(() => parsePublishedProduct({ ...value, ...change })).toThrow();
     }
+  });
+  it('parses and projects public MCB fields while keeping legacy products readable', () => {
+    const published = { ...value, category: 'Circuit breakers' as const, protectionType: 'MCB' as const,
+      mcbSpecifications: { type: 'DC' as const, amperage: 0.5 } };
+    const parsed = parsePublishedProduct(published);
+    expect(publishedView(parsed)).toMatchObject({ protectionType: 'MCB', mcbSpecifications: { type: 'DC', amperage: 0.5 }, spec: '0.5 A · DC', secondarySpec: 'Miniature circuit breaker' });
+    expect(() => parsePublishedProduct({ ...published, mcbSpecifications: { type: 'DC', amperage: 0 } })).toThrow();
+    expect(() => parsePublishedProduct({ ...published, category: 'Panels' })).toThrow();
+    expect(publishedView(parsePublishedProduct(value)).mcbSpecifications).toBeUndefined();
+  });
+  it('parses ATS as its own category without treating it as an MCB', () => {
+    const ats = { ...value, category: 'ATS' as const, protectionType: 'ATS' as const };
+    expect(publishedView(parsePublishedProduct(ats))).toMatchObject({ protectionType: 'ATS', secondarySpec: 'ATS', spec: 'Amperage not specified' });
+    expect(publishedView(parsePublishedProduct({ ...ats, atsSpecifications: { amperage: 63.5 } })))
+      .toMatchObject({ atsSpecifications: { amperage: 63.5 }, spec: '63.5 A', secondarySpec: 'ATS' });
+    expect(publishedView(parsePublishedProduct({ ...ats, name: 'Fanhey ATS 63A', atsSpecifications: null })).atsSpecifications).toBeNull();
+    expect(publishedView(parsePublishedProduct(ats)).atsSpecifications).toBeUndefined();
+    for (const atsSpecifications of [{}, { amperage: 0 }, { amperage: Infinity }, { amperage: '63' }, { amperage: 63, type: 'DC' }])
+      expect(() => parsePublishedProduct({ ...ats, atsSpecifications })).toThrow();
+    expect(parsePublishedProduct({ ...ats, protectionType: null, atsSpecifications: { amperage: 63 } }).category).toBe('ATS');
+    expect(() => parsePublishedProduct({ ...ats, category: 'Batteries' })).toThrow();
+    expect(() => parsePublishedProduct({ ...ats, mcbSpecifications: { type: 'AC', amperage: 16 } })).toThrow();
   });
   it('fetches anonymously and starts with no demo records', async () => {
     fetcher.mockResolvedValueOnce(json({ items: [value], nextCursor: null }));

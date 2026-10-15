@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { signal } from '@angular/core';
 import { PRODUCTS } from './demo-data';
-import { BomItem, createNewProjectDraft, FreeTextBomItem } from './models';
+import { BomComponentCategory, BomItem, createNewProjectDraft, FreeTextBomItem } from './models';
 import { freeTextInput, pendingProduct, projectBomCsv, projectBomRow, resolveProduct, validPendingProduct, validateFreeText } from './project-bom';
 import { LOCAL_PROJECTS_KEY, ProjectService } from './project.service';
 const input = (name = 'Roof') => ({ ...createNewProjectDraft(), name, classification: 'residential' as const, configuration: 'hybrid' as const, workScope: 'new-installation' as const });
@@ -57,6 +57,56 @@ describe('project BOM local writes and pricing', () => {
     expect(after.id).toBe(before.id); expect(after.createdAt).toBe(before.createdAt); expect(after.title).toBe('Copper cable'); expect(after.quantity).toBe(30);
     expect(new ProjectService(signal(PRODUCTS)).projects()[0].bom.items[0]).toEqual(after);
   });
+  it('persists explicit free-text categories, preserves them on edit, and rejects invalid categories', async () => {
+    const service = new ProjectService(signal(PRODUCTS));
+    await service.create(input(), 'one');
+    const id = service.projects()[0].id;
+    const categorized = { ...textInput(), componentCategory: 'Panels' as BomComponentCategory };
+    expect(validateFreeText({ ...categorized, componentCategory: 'Roofing' as BomComponentCategory })).toHaveProperty('componentCategory');
+    expect((await service.saveFreeText(id, { ...categorized, componentCategory: 'Roofing' as BomComponentCategory }, 'invalid')).ok).toBe(false);
+    expect((await service.saveFreeText(id, categorized, 'categorized')).ok).toBe(true);
+    const saved = new ProjectService(signal(PRODUCTS)).projects()[0].bom.items[0] as FreeTextBomItem;
+    expect(saved.componentCategory).toBe('Panels');
+    expect(freeTextInput(saved).componentCategory).toBe('Panels');
+
+    expect((await service.saveFreeText(id, textInput(), 'edit', saved.id)).ok).toBe(true);
+    const edited = new ProjectService(signal(PRODUCTS)).projects()[0].bom.items[0] as FreeTextBomItem;
+    expect(edited.componentCategory).toBe('Panels');
+    expect(edited.title).toBe('Cable');
+  });
+  it('requires valid amperage only for Protection ATS metadata and previews the explicit rating', () => {
+    const ats = { ...textInput(), componentCategory: 'Protection' as BomComponentCategory, componentProtectionType: 'ATS' as const, amperage: 63.5 };
+    expect(validateFreeText(ats)).toEqual({});
+    expect(validateFreeText({ ...ats, amperage: 0 })).toHaveProperty('amperage');
+    expect(validateFreeText({ ...ats, amperage: Number.MAX_SAFE_INTEGER + 1 })).toHaveProperty('amperage');
+    expect(validateFreeText({ ...ats, amperage: Infinity })).toHaveProperty('amperage');
+    expect(validateFreeText({ ...ats, componentCategory: 'Panels' as BomComponentCategory })).toHaveProperty('componentProtectionType');
+    expect(validateFreeText({ ...textInput(), amperage: 20 })).toHaveProperty('amperage');
+    expect(validateFreeText({ ...textInput(), componentProtectionType: 'ATS' })).toHaveProperty('amperage');
+    expect(validateFreeText(textInput())).toEqual({});
+    const item: FreeTextBomItem = { id: 'text-test', kind: 'free-text', title: 'ATS', description: '', unit: 'piece', quantity: 1,
+      componentCategory: 'Protection', componentProtectionType: 'ATS', amperage: 63.5, estimate: { kind: 'unpriced' }, createdAt: '2026-10-10T00:00:00.000Z', updatedAt: '2026-10-10T00:00:00.000Z' };
+    expect(freeTextInput(item)).toMatchObject({ componentProtectionType: 'ATS', amperage: 63.5 });
+    expect(projectBomRow(item).specification).toBe('ATS · 63.5 A');
+  });
+  it('saves, edits, and reloads preview ATS subtype and decimal amperage', async () => {
+    const service = new ProjectService(signal(PRODUCTS));
+    await service.create(input(), 'ats-preview');
+    const projectId = service.projects()[0].id;
+    const ats = { ...textInput(), title: 'Transfer switch', unit: 'piece', componentCategory: 'Protection' as const,
+      componentProtectionType: 'ATS' as const, amperage: 63.5 };
+    expect((await service.saveFreeText(projectId, ats, 'ats-line')).ok).toBe(true);
+    const firstReload = new ProjectService(signal(PRODUCTS));
+    const saved = firstReload.projects()[0].bom.items[0] as FreeTextBomItem;
+    expect(saved).toMatchObject({ componentCategory: 'Protection', componentProtectionType: 'ATS', amperage: 63.5 });
+    expect(projectBomRow(saved).specification).toBe('ATS · 63.5 A');
+
+    expect((await firstReload.saveFreeText(projectId, { ...textInput(), componentCategory: 'Panels' }, 'ats-invalid-edit', saved.id)).ok).toBe(false);
+    expect(firstReload.projects()[0].bom.items[0]).toEqual(saved);
+    expect((await firstReload.saveFreeText(projectId, { ...textInput(), title: 'Updated transfer switch' }, 'ats-edit', saved.id)).ok).toBe(true);
+    const afterEditReload = new ProjectService(signal(PRODUCTS)).projects()[0].bom.items[0] as FreeTextBomItem;
+    expect(afterEditReload).toMatchObject({ title: 'Updated transfer switch', componentCategory: 'Protection', componentProtectionType: 'ATS', amperage: 63.5 });
+  });
   it('keeps saved values unchanged on failed edit/removal and supports undo without reordering', async () => {
     const service=new ProjectService(signal(PRODUCTS)); (await service.create(input(),'one')); const id=service.projects()[0].id;
     (await service.addProduct(id,pendingProduct(PRODUCTS[0]),'one')); (await service.saveFreeText(id,textInput(),'text'));
@@ -96,6 +146,8 @@ describe('project BOM local writes and pricing', () => {
     expect(projectBomRow(items[0], PRODUCTS).unitPrice).toBe(5890); expect(projectBomRow(items[1], PRODUCTS).unitPrice).toBeNull();
     const csv=projectBomCsv(items, PRODUCTS);
     expect(csv).toContain('store-product'); expect(csv).toContain('free-text'); expect(csv).toContain("'=1+1"); expect(csv).toContain('A,""quoted""\ntext'); expect(csv).toContain('"","","Unpriced requirement');
+    expect(csv).not.toContain('Line ID');
+    expect(csv).not.toContain(items[0].id);
     expect(projectBomRow({...items[0],quantity:Number.MAX_SAFE_INTEGER} as BomItem, PRODUCTS).total).toBeNull();
   });
   it('resolves arbitrary published UUID references, uses a flat tax-unknown price, and marks withdrawn products unavailable', async () => {
@@ -115,5 +167,7 @@ describe('project BOM local writes and pricing', () => {
     expect(row.pricing).toContain('tax unspecified');
     expect(resolveProduct(item.kind === 'store-product' ? item.product : pending.product, [])).toBeUndefined();
     expect(projectBomRow(item, []).total).toBeNull();
+    expect(projectBomRow(item, []).title).toBe('Unavailable product');
+    expect(projectBomCsv([item], [])).not.toContain(id);
   });
 });

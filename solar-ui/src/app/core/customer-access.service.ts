@@ -9,6 +9,8 @@ import { LOCAL_CUSTOMER_ID } from './project.service';
 import { AuthSessionService } from './auth-session.service';
 import { AuthNavigationService } from './auth-navigation.service';
 import { PLANNING_PRODUCTS } from './product-source';
+import { safeCustomerReturnUrl } from './customer-return-url';
+export { safeCustomerReturnUrl } from './customer-return-url';
 
 export interface CustomerSession { readonly customerId: string; readonly displayName?: string | null; readonly source?: 'firebase'; }
 /** Production supplies the Firebase-owned session; tests default to signed-out without network. */
@@ -21,11 +23,6 @@ export type PendingCustomerAction =
   | { kind: 'guest-list'; returnUrl: string; guest: PendingGuestList };
 export const PENDING_CUSTOMER_ACTION_KEY = 'solar.sign-in.pending.v1';
 const MAX_AGE = 24 * 60 * 60 * 1000;
-/** Only implemented public/customer routes; never an external URL or encoded redirect. */
-export function safeCustomerReturnUrl(value: unknown): string {
-  if (typeof value !== 'string' || value.length > 2048 || /[%\\\s]/.test(value)) return '/catalog';
-  return /^\/(?:catalog|draft|my(?:\/(?:projects(?:\/[a-zA-Z0-9_-]+(?:\/bom)?)?|favorites|profile|settings))?)(?:[?#][a-zA-Z0-9_=&.#/-]*)?$/.test(value) ? value : '/catalog';
-}
 function validAction(value: unknown): value is PendingCustomerAction {
   if (!value || typeof value !== 'object') return false;
   const a = value as Record<string, unknown>;
@@ -116,7 +113,7 @@ export class CustomerAccessService {
       if (this.router.url !== originalUrl || this.projectSessionKey() !== owner) return;
       const pending = this.pending();
       const ref = this.dialog.open<void>(SignInDialog, {
-        data: { context: 'Sign in before creating projects or adding equipment to a project.', pendingLabel: pending?.kind === 'product' ? `${pending.pending.quantity} × ${resolveProduct(pending.pending.product, this.products())?.name ?? pending.pending.product.productId}. Kept for later review; nothing added.` : pending?.kind === 'guest-list' ? 'Your cart request is kept for later review. Nothing copied.' : '', warning: this.retentionWarning() },
+        data: { context: 'Sign in before creating projects or adding equipment to a project.', pendingLabel: pending?.kind === 'product' ? `${pending.pending.quantity} × ${resolveProduct(pending.pending.product, this.products())?.name ?? 'Unavailable product'}. Kept for later review; nothing added.` : pending?.kind === 'guest-list' ? 'Your cart request is kept for later review. Nothing copied.' : '', warning: this.retentionWarning() },
         width: '520px', maxWidth: 'calc(100vw - 32px)', ariaLabelledBy: 'sign-in-title',
         panelClass: 'solar-dialog-panel', backdropClass: 'solar-dialog-backdrop',
       });

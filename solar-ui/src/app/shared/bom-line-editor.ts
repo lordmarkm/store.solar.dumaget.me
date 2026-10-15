@@ -2,16 +2,17 @@ import { DialogRef, DIALOG_DATA } from '@angular/cdk/dialog';
 import { afterNextRender, Component, effect, ElementRef, inject, Injector, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { FreeTextInput, freeTextInput, validateFreeText } from '../core/project-bom';
-import { FreeTextBomItem } from '../core/models';
+import { BomComponentCategory, BomComponentProtectionType, FreeTextBomItem } from '../core/models';
 import { ProjectService } from '../core/project.service';
 import { CustomerAccessService } from '../core/customer-access.service';
 import { projectUiRequest, projectUiSession } from './project-ui-session';
+import { IntegerQuantity } from './integer-quantity';
 
-export interface BomLineEditorData { readonly projectId: string; readonly item?: FreeTextBomItem }
+export interface BomLineEditorData { readonly projectId: string; readonly item?: FreeTextBomItem; readonly componentCategory?: BomComponentCategory; readonly componentProtectionType?: BomComponentProtectionType; readonly componentLabel?: string; readonly quantity?: number }
 
 @Component({
   selector: 'app-bom-line-editor',
-  imports: [FormsModule],
+  imports: [FormsModule, IntegerQuantity],
   templateUrl: './bom-line-editor.html',
 })
 export class BomLineEditor {
@@ -24,11 +25,18 @@ export class BomLineEditor {
   private readonly requestId = projectUiRequest();
   private readonly owner = this.access.projectSessionKey();
   private readonly session = projectUiSession(() => this.ref.close(), { cleanupOnDestroy: false });
-  readonly draft = signal<FreeTextInput>(freeTextInput(this.data.item));
+  readonly draft = signal<FreeTextInput>({ ...freeTextInput(this.data.item),
+    ...(!this.data.item && (this.data.componentCategory || this.data.componentProtectionType === 'ATS') ? { componentCategory: this.data.componentCategory ?? 'ATS' } : {}),
+    ...(!this.data.item && this.data.componentProtectionType ? { componentProtectionType: this.data.componentProtectionType } : {}),
+    ...(!this.data.item && this.data.quantity !== undefined ? { quantity: this.data.quantity } : {}),
+  });
   readonly attempted = signal(false);
   readonly saving = signal(false);
   readonly saveError = signal<string | null>(null);
-  constructor() { effect(() => { if (!this.access.canAccessProjects()) this.ref.close(); }); }
+  constructor() {
+    effect(() => { if (!this.access.canAccessProjects()) this.ref.close(); });
+    afterNextRender(() => this.host.nativeElement.querySelector<HTMLInputElement>('input')?.focus(), { injector: this.injector });
+  }
 
   update<K extends keyof FreeTextInput>(key: K, value: FreeTextInput[K]): void {
     if (this.saving() || !this.session.current(this.owner)) return;
@@ -41,7 +49,7 @@ export class BomLineEditor {
   }
 
   async save(): Promise<void> {
-    if (!this.session.current(this.owner)) return;
+    if (!this.session.current(this.owner) || !this.projects.projects().some(project => project.id === this.data.projectId && project.customerId === this.access.customerId() && project.status === 'draft')) return;
     if (this.saving()) return;
     this.attempted.set(true);
     if (Object.keys(validateFreeText(this.draft())).length) {

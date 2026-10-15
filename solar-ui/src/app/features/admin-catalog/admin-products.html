@@ -1,8 +1,8 @@
 <div>
   <header class="mb-6 flex flex-wrap items-end justify-between gap-4">
-    <div><p class="eyebrow mb-2">Administration / catalog</p><h1 class="page-title">Products</h1><p class="mt-2 text-sm text-secondary-foreground">Private drafts, published listings, and saved working copies. Stock, tax, and media remain unconfigured.</p></div>
-    @if (canAccess()) { <a routerLink="/admin/products/new" class="kt-btn kt-btn-primary"><i class="ki-outline ki-check" aria-hidden="true"></i>New product</a> }
-    @else { <button type="button" class="kt-btn kt-btn-primary" disabled title="Administrator access is required"><i class="ki-outline ki-check" aria-hidden="true"></i>New product</button> }
+    <div><p class="eyebrow mb-2">Administration / catalog</p><h1 class="page-title">Products</h1><p class="mt-2 text-sm text-secondary-foreground">Manage product details, supplier assignments, prices, and publication status.</p></div>
+    @if (canAccess()) { <a routerLink="/admin/products/new" class="kt-btn kt-btn-primary"><i class="ki-outline ki-plus" aria-hidden="true"></i>New product</a> }
+    @else { <button type="button" class="kt-btn kt-btn-light" disabled title="Administrator access is required"><i class="ki-outline ki-plus" aria-hidden="true"></i>New product</button> }
   </header>
 
   @if (!canAccess()) {
@@ -26,7 +26,6 @@
         </div>
         <app-tooltip label="Clear filters" class="mb-1 shrink-0"><button type="button" class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" aria-label="Clear filters" title="Clear filters" (click)="clearFilters()"><i class="ki-outline ki-cross" aria-hidden="true"></i></button></app-tooltip>
       </div>
-      <p class="mt-3 text-xs text-secondary-foreground">SKU prefix, brand, category, and supplier filters apply across authorized products before pagination.</p>
       @if (suppliersError()) { <p class="mt-3 text-sm text-danger" role="alert">{{ suppliersError() }}</p><button type="button" class="kt-btn kt-btn-light mt-2" [disabled]="suppliersLoading()" (click)="retrySuppliers()">Retry supplier options</button> }
       @if (supplierCursor()) { <button type="button" class="kt-btn kt-btn-light mt-3" [disabled]="suppliersLoading()" (click)="loadMoreSuppliers()">{{ suppliersLoading() ? 'Loading…' : 'Load more supplier options' }}</button> }
       @if (brandsError()) { <p class="mt-3 text-sm text-danger" role="alert">{{ brandsError() }}</p><button type="button" class="kt-btn kt-btn-light mt-2" [disabled]="brandsLoading()" (click)="retryBrands()">Retry brand options</button> }
@@ -37,11 +36,23 @@
     @if (searchPending()) { <p class="kt-card p-6 text-sm" role="status">Searching SKU prefix…</p> }
     @if (!loading() && !searchPending() && !error() && !rows().length) { <section class="kt-card p-8 text-center"><h2 class="text-lg font-semibold">{{ productFilters().skuPrefix || productFilters().brand || productFilters().category || productFilters().supplierId ? 'No matching products' : 'No products yet' }}</h2><p class="mt-2 text-sm text-secondary-foreground">{{ productFilters().skuPrefix || productFilters().brand || productFilters().category || productFilters().supplierId ? 'Try another filter or clear the current filters.' : 'Create a product to add a private draft record.' }}</p></section> }
     @if (rows().length) {
-      <div class="kt-card overflow-x-auto"><table class="w-full min-w-[760px] text-left text-sm"><thead class="border-b border-border bg-muted/50 text-xs text-secondary-foreground"><tr><th scope="col" class="p-4">Product</th><th scope="col" class="p-4">Brand / category</th><th scope="col" class="p-4">Supplier</th><th scope="col" class="p-4 text-right">Price (PHP)</th><th scope="col" class="p-4">State</th><th scope="col" class="p-4">Actions</th></tr></thead><tbody class="divide-y divide-border">
-        @for (product of rows(); track product.id) {
-          <tr><th scope="row" class="p-4 font-medium"><span class="block">{{ product.name }}</span><span class="mt-1 block text-xs font-normal text-secondary-foreground">{{ product.sku }}</span></th><td class="p-4">{{ product.brand || '—' }}<span class="mt-1 block text-xs text-secondary-foreground">{{ product.category ?? 'Uncategorized' }}</span></td><td class="p-4"><span>{{ supplierName(product.supplierId) }}</span><span class="mt-1 block font-mono text-[10px] text-secondary-foreground">{{ product.supplierId }}</span></td><td class="p-4 text-right tabular-nums">@if (product.amountMinor === null) { — } @else { {{ product.amountMinor / 100 | currency:'PHP':'symbol':'1.2-2' }} }</td><td class="p-4"><span class="kt-badge kt-badge-sm kt-badge-outline">{{ product.state }}</span>@if (product.state === 'published' && product.publishedVersion !== undefined && product.publishedVersion < product.version) { <span class="mt-1 block text-xs text-secondary-foreground">Private changes not published</span> }</td><td class="p-4"><a class="kt-btn kt-btn-sm kt-btn-light" [routerLink]="['/admin/products', product.id, 'edit']" [attr.aria-label]="'Edit ' + product.name"><i class="ki-outline ki-pencil" aria-hidden="true"></i>Edit</a></td></tr>
-        }
-      </tbody></table></div>
+      <app-ktui-table class="kt-card" [rows]="rows()" [rowKey]="tableRowKey" label="Products" [busy]="loading()">
+        <ng-template solarTableColumn="product" [solarTableColumnOf]="rows()" header="Product" width="28%" let-product>
+          <div class="flex min-w-0 items-start gap-3">
+            @if (product.images?.[0]; as image) {
+              <button type="button" class="solar-product-image-trigger h-12 w-12 shrink-0" [productLightbox]="product.images" [lightboxLabel]="product.name" [attr.aria-label]="'Enlarge ' + product.name" [attr.title]="'Enlarge ' + product.name">
+                <img class="h-full w-full object-contain" [src]="image.thumbnailUrl" [alt]="product.name + ' product image'" loading="lazy" />
+              </button>
+            }
+            <div class="min-w-0"><span class="block font-medium">{{ product.name }}</span><span class="mt-1 block text-xs text-secondary-foreground">{{ product.sku }}</span></div>
+          </div>
+        </ng-template>
+        <ng-template solarTableColumn="brand-category" [solarTableColumnOf]="rows()" header="Brand / category" width="13%" let-product>{{ product.brand || '—' }}<span class="mt-1 block text-xs text-secondary-foreground">{{ product.category ?? 'Uncategorized' }}</span></ng-template>
+        <ng-template solarTableColumn="supplier" [solarTableColumnOf]="rows()" header="Supplier" width="19%" let-product><span class="block">{{ supplierName(product.supplierId) }}</span></ng-template>
+        <ng-template solarTableColumn="price" [solarTableColumnOf]="rows()" header="Price (PHP)" width="14%" let-product><span class="tabular-nums">@if (product.amountMinor === null) { — } @else { {{ product.amountMinor / 100 | currency:'PHP':'symbol':'1.2-2' }} }</span></ng-template>
+        <ng-template solarTableColumn="state" [solarTableColumnOf]="rows()" header="State" width="14%" let-product><span class="kt-badge kt-badge-sm kt-badge-outline">{{ product.state }}</span>@if (product.state === 'published' && product.publishedVersion !== undefined && product.publishedVersion < product.version) { <span class="mt-1 block text-xs text-secondary-foreground">Private changes not published</span> }</ng-template>
+        <ng-template solarTableColumn="actions" [solarTableColumnOf]="rows()" header="Actions" width="12%" let-product><app-tooltip [label]="'Edit ' + product.name"><a class="kt-btn kt-btn-sm kt-btn-icon kt-btn-light" [routerLink]="['/admin/products', product.id, 'edit']" [attr.aria-label]="'Edit ' + product.name" [attr.title]="'Edit ' + product.name"><i class="ki-outline ki-pencil" aria-hidden="true"></i></a></app-tooltip></ng-template>
+      </app-ktui-table>
     }
     @if (cursor()) { <div class="mt-5 flex justify-center"><button type="button" class="kt-btn kt-btn-light" [disabled]="loading()" (click)="loadMore()">{{ loading() ? 'Loading…' : 'Load more products' }}</button></div> }
   }

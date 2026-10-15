@@ -15,8 +15,12 @@ let time = Date.parse('2026-10-09T00:00:00.000Z');
 const objects = new Map<string, { generation: string; metadata: Record<string, string>; contentType: string }>();
 const deletions: string[] = [];
 let failPath: string | null = null, onDelete: (() => Promise<void>) | null = null;
+let onMetadata: (() => Promise<void>) | null = null;
 const bucket = { file(path: string) { return {
-  async getMetadata() { const value = objects.get(path); if (!value) throw { code: 404 }; return [value]; },
+  async getMetadata() {
+    if (onMetadata) { const callback = onMetadata; onMetadata = null; await callback(); }
+    const value = objects.get(path); if (!value) throw { code: 404 }; return [value];
+  },
   async delete(options: { ifGenerationMatch: string }) {
     assert.match(path, /^products\/[a-f0-9]{64}\/(?:thumb|detail)\.webp$/);
     if (onDelete) { const callback = onDelete; onDelete = null; await callback(); }
@@ -104,6 +108,21 @@ try {
   f = await repo.updateProduct(identity, f.id, { ...inputF, images: [], ...command(f.version) });
   assert.equal(objects.has('products/' + imageF.id + '/detail.webp'), false, 'Concurrent attach cannot race the deletion claim.');
 
+  const image1 = uploadFixture('1');
+  await lifecycle.beginUpload(image1); await lifecycle.finishUpload(image1);
+  const input1 = productInput('IMAGE-EXPIRED-WORKER', [image1]);
+  const one = await repo.createProduct(identity, input1);
+  onMetadata = async () => {
+    time += 5 * 60 * 1000 + 1;
+    await lifecycle.sweep(); // Another worker finishes the expired deletion claim.
+    const reuploaded = uploadFixture('1');
+    for (const variant of ['thumb', 'detail']) objects.get('products/' + image1.id + '/' + variant + '.webp')!.generation = '456';
+    await lifecycle.beginUpload(reuploaded); await lifecycle.finishUpload(reuploaded);
+  };
+  await repo.updateProduct(identity, one.id, { ...input1, images: [], ...command(one.version) });
+  for (const variant of ['thumb', 'detail']) assert.equal(objects.get('products/' + image1.id + '/' + variant + '.webp')?.generation, '456',
+    'Superseded cleanup must not delete a later reupload even if it observes the new generation.');
+
   const renamed = { ...supplierInput, name: supplier.name + ' renamed', ...command(supplier.version) };
   supplier = await repo.updateSupplier(identity, supplier.id, renamed);
   assert.deepEqual(await repo.updateSupplier(identity, supplier.id, renamed), supplier, 'Edit retry is idempotent.');
@@ -136,5 +155,23 @@ try {
   let cursor: string | null = null;
   do { const result = await repo.productBrands(cursor); brands.push(...result.items); cursor = result.nextCursor; } while (cursor);
   assert.ok(brands.includes('Beyond first page'));
-  console.log('PASS post-commit deletion, shared/public/hold retention, failed Save, tombstone/retry/race, orphan grace, supplier edit/status/idempotency, API filters/pagination/brands. Emulator + synthetic bucket only.');
+  for (let n = 0; n < 55; n++) await repo.createSupplier(identity, { ...supplierInput, requestId: randomUUID(),
+    name: 'FILTER-' + String(n).padStart(3, '0') });
+  let unicode = await repo.createSupplier(identity, { ...supplierInput, requestId: randomUUID(), name: 'FILTER-🌞' });
+  const supplierPage = await repo.suppliers(null, { namePrefix: 'FILTER-', status: 'active' });
+  assert.equal(supplierPage.items.length, 50); assert.ok(supplierPage.nextCursor);
+  const supplierNext = await repo.suppliers(supplierPage.nextCursor, { status: 'active', namePrefix: 'FILTER-' });
+  assert.equal(supplierNext.items.length, 6);
+  assert.equal(new Set([...supplierPage.items, ...supplierNext.items].map(item => item.id)).size, 56);
+  assert.equal((await repo.suppliers(null, { namePrefix: 'FILTER-🌞' })).items[0]?.id, unicode.id);
+  assert.equal((await repo.suppliers(null, { namePrefix: 'filter-' })).items.length, 0, 'Search is explicitly case-sensitive.');
+  await assert.rejects(repo.suppliers(supplierPage.nextCursor, { status: 'inactive', namePrefix: 'FILTER-' }), { code: 'INVALID_CURSOR' });
+  await assert.rejects(repo.suppliers(supplierPage.nextCursor, { namePrefix: 'OTHER-' }), { code: 'INVALID_CURSOR' });
+  unicode = await repo.setSupplierStatus(identity, unicode.id, { ...command(unicode.version), status: 'inactive' });
+  assert.deepEqual((await repo.suppliers(null, { status: 'inactive', namePrefix: 'FILTER-' })).items.map(item => item.id), [unicode.id]);
+  assert.equal((await repo.suppliers(null, { status: 'active', namePrefix: 'FILTER-🌞' })).items.length, 0);
+  const unfiltered = await repo.suppliers(null);
+  assert.match(unfiltered.nextCursor!, /^[a-f0-9-]{36}$/);
+  assert.ok((await repo.suppliers(unfiltered.nextCursor)).items.length > 0);
+  console.log('PASS image lifecycle, supplier edit/status/idempotency, product filters/brands, supplier API filters/Unicode/pagination/cursor isolation. Emulator + synthetic bucket only.');
 } finally { await db.terminate(); await deleteApp(app); }

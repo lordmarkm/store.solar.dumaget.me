@@ -1,5 +1,17 @@
 # Dumaget.me Solar Supply
 
+## Plans and current priority
+
+Use [plans/README.md](plans/README.md) as the canonical roadmap index. The next
+customer feature is the [project Build Assistant](plans/PROJECT-BUILDER-PLAN.md):
+a category table supporting multiple products/free-text rows per category,
+compatibility feedback and reviewed atomic additions to an editable project BOM.
+Its UI direction is accepted; implementation has not started.
+
+Current account Projects, connected catalog/admin operations and physical inventory
+are documented in docs/. Older scaffold/local-preview statements below are
+historical where the latest implementation contracts supersede them.
+
 Angular scaffold for the solar contractor catalog and operations workspace,
 with a separate local Node.js/TypeScript API bootstrap.
 Layouts and workflows are adapted from the Google Stitch reference; styling uses
@@ -56,7 +68,9 @@ Angular scripts and frontend fixtures remain unchanged. See
   required existing supplier and retry-safe writes to named `store-dev`.
 - `/admin/suppliers` and `/admin/suppliers/new`: private supplier listing/creation.
   No sample records are exposed through these canonical admin routes.
-- `/admin/inventory`: retained blue, read-only fixture preview, not live stock.
+- /admin/inventory: protected physical stock by location; reviewed counts,
+  atomic transfers, thresholds, API-side stock-status filtering and bounded CSV
+  exports. See [inventory management](docs/INVENTORY-MANAGEMENT.md).
 
 Supplier/product forms and API are implemented and locally tested; live use still
 requires the unresolved Auth decision, trusted admin bootstrap and verification.
@@ -117,7 +131,7 @@ Provia blue theme. Dialogs and other overlays inherit the active page's appearan
 
 ## Admin product-management roadmap
 
-See [the admin product-management plan](docs/ADMIN-PRODUCT-MANAGEMENT-PLAN.md)
+See [the admin product-management plan](plans/ADMIN-PRODUCT-MANAGEMENT-PLAN.md)
 for proposed product list/detail/editor pages, draft/publish/archive workflows,
 categories/brands, public pricing versus private supplier offers, media retention,
 and a phased path from isolated preview to authorized backend writes. The New
@@ -155,7 +169,7 @@ light/dark browser checks. No sourcing, pricing or cloud data was changed.
 
 ## User-facing roadmap
 
-See [the user-facing website plan](docs/USER-FACING-PLAN.md) for the proposed
+See [the user-facing website plan](plans/USER-FACING-PLAN.md) for the proposed
 sidebar-free shopping area and separate customer My pages (projects/BOM,
 favorites, profile, and later purchase orders with a pre-lock quotation-review
 stage rather than a separate quotation page). Each project keeps an

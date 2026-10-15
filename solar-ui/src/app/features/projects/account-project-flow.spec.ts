@@ -12,7 +12,9 @@ import { BomService } from '../../core/bom.service';
 import { PLANNING_PRODUCTS } from '../../core/product-source';
 import { ProjectService, LOCAL_PROJECTS_KEY } from '../../core/project.service';
 import { PublicCatalogService, PublishedProduct } from '../../core/public-catalog.service';
+import { ProjectBomPage } from './project-bom';
 import { STORE_API_FETCH } from '../../core/store-api.service';
+import { FreeTextInput } from '../../core/project-bom';
 import { firstValueFrom } from 'rxjs';
 
 const productId = '11111111-1111-4111-8111-111111111111';
@@ -45,7 +47,7 @@ describe('account project UI with isolated HTTP/SDK doubles', () => {
       signOut: async () => { publish(null); }, getIdToken: async uid => 'test-token-' + uid };
     const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
     const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
+      const path = String(input).split('?')[0]!;
       if (path === '/api/v1/catalog/references') return response({ items: publishedAvailable ? [published] : [] });
       if (path === '/api/v1/catalog/products') return response({ items: [published], nextCursor: null });
       if (path === '/api/v1/catalog/products/' + productId) return response({ product: published });
@@ -70,7 +72,7 @@ describe('account project UI with isolated HTTP/SDK doubles', () => {
         if (body['expectedVersion'] !== old.version) return response({}, 409);
         let items = [...old.bom.items]; let copyReceipt = null;
         if (body['action'] === 'free-text') {
-          const freeText = body['input'] as { title: string; description: string; unit: string; quantity: number; notes: string };
+          const freeText = body['input'] as FreeTextInput;
           items.push({ ...freeText, id: lineId, kind: 'free-text', estimate: { kind: 'unpriced' }, createdAt: at, updatedAt: at });
         } else if (body['action'] === 'quantity') items = items.map(item => item.id === body['itemId'] ? { ...item, quantity: body['quantity'] as number } : item);
         else if (body['action'] === 'add-items') {
@@ -141,21 +143,34 @@ describe('account project UI with isolated HTTP/SDK doubles', () => {
     await harness.navigateByUrl('/my/projects/' + projectId + '/bom'); await settle(harness);
     await vi.waitFor(async () => {
       await settle(harness);
-      const addLine = [...harness.routeNativeElement!.querySelectorAll<HTMLButtonElement>('button')]
-        .find(button => button.textContent?.trim() === 'Add free-text line');
-      expect(addLine).toBeDefined();
-      expect(addLine!.disabled).toBe(false);
+      const buttons = [...harness.routeNativeElement!.querySelectorAll<HTMLButtonElement>('button')];
+      expect(buttons.some(button => button.textContent?.trim() === 'Add free-text line')).toBe(false);
+      expect(buttons.find(button => button.textContent?.trim() === 'Add inverter')?.disabled).toBe(false);
     });
-    click(harness.routeNativeElement!, 'Add free-text line'); await settle(harness);
-    const root = document.querySelector('[role="dialog"]')!;
-    fill(root, 'bom-line-title', 'Installation labor'); fill(root, 'bom-line-unit', 'job');
-    fill(root, 'bom-line-description', 'Roof work\nCommissioning');
-    click(root, 'Add to BOM'); await settle(harness);
-    expect(records.get('customer-a')![0].bom.items[0].kind).toBe('free-text');
+    click(harness.routeNativeElement!, 'Add inverter'); await settle(harness);
+    await vi.waitFor(() => expect(document.querySelector('#component-picker-title')).not.toBeNull());
+    const pickerRoot = document.querySelector('#component-picker-title')!.closest('section')!;
+    await vi.waitFor(() => expect(pickerRoot.querySelector('#component-quantity')).not.toBeNull());
+    fill(pickerRoot, 'component-quantity', '7');
+    click(pickerRoot, 'Add free-text line'); await settle(harness);
+    expect(TestBed.inject(Dialog).openDialogs).toHaveLength(1);
+    expect(document.querySelector('#component-quantity')).toBeNull();
+    const editorRoot = document.querySelector('#bom-line-editor-title')!.closest('section')!;
+    fill(editorRoot, 'bom-line-title', 'Installation labor'); fill(editorRoot, 'bom-line-unit', 'job');
+    fill(editorRoot, 'bom-line-description', 'Roof work\nCommissioning');
+    click(editorRoot, 'Add to BOM'); await settle(harness);
+    const savedText = records.get('customer-a')![0].bom.items[0];
+    expect(savedText).toMatchObject({ kind: 'free-text', componentCategory: 'Inverters', quantity: 7 });
+    expect(writes.filter(write => write.body['action'] === 'free-text').map(write => write.body['input']))
+      .toEqual([expect.objectContaining({ componentCategory: 'Inverters', quantity: 7 })]);
     expect(harness.routeNativeElement!.textContent).toContain('Installation labor');
+    const page = harness.routeDebugElement!.query(node => node.componentInstance instanceof ProjectBomPage)!.componentInstance as ProjectBomPage;
+    await page.reload(); await settle(harness);
+    expect(page.components().filter(entry => entry.component.id === 'inverters').map(entry => entry.line?.item))
+      .toMatchObject([{ kind: 'free-text', componentCategory: 'Inverters', quantity: 7 }]);
     const quantity = harness.routeNativeElement!.querySelector<HTMLInputElement>('#qty-' + lineId)!;
     quantity.value = '7'; quantity.dispatchEvent(new Event('input', { bubbles: true }));
-    click(harness.routeNativeElement!, 'Save quantity'); await settle(harness);
+    harness.routeNativeElement!.querySelector<HTMLButtonElement>('[aria-label="Save quantity for Installation labor line 1"]')!.click(); await settle(harness);
     expect(records.get('customer-a')![0].bom.items[0].quantity).toBe(7);
     expect(writes.filter(write => write.body['action'] === 'quantity')).toHaveLength(1);
     expect(harness.routeNativeElement!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true);
@@ -189,7 +204,10 @@ describe('account project UI with isolated HTTP/SDK doubles', () => {
     select.dispatchEvent(new Event('change', { bubbles: true })); await settle(harness);
     // Destination confirmation is intentionally a separate user action.
     const confirm = [...root.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Add') && button.textContent?.includes('selected'));
+    const copied = firstValueFrom(TestBed.inject(Dialog).openDialogs[0].closed);
     expect(confirm).toBeDefined(); confirm!.click(); await settle(harness);
+    await copied;
+    await settle(harness);
     expect(service.currentGuestList()?.state).toBe('linked');
     expect(service.currentGuestList()?.items).toEqual(before);
     expect(records.get('customer-a')![0].bom.items).toHaveLength(before.length);
@@ -219,5 +237,65 @@ describe('account project UI with isolated HTTP/SDK doubles', () => {
     expect(TestBed.inject(ProjectService).projects()[0].bom.items[0].quantity).toBe(8);
     expect(values.get(LOCAL_PROJECTS_KEY)).toBe(previewRaw);
     expect(writes).toEqual([]);
+  });
+
+  it('omits standalone BOM reload and offers a guarded page-level retry only on error', async () => {
+    const firstLine = { id: lineId, kind: 'free-text' as const, title: 'Installation labor', description: 'Roof work', unit: 'job', quantity: 1,
+      notes: '', estimate: { kind: 'unpriced' as const }, createdAt: at, updatedAt: at };
+    const secondLine = { ...firstLine, id: 'text-44444444-4444-4444-8444-444444444444', title: 'Commissioning', quantity: 2 };
+    records.set('customer-a', [{ ...details, id: projectId, schemaVersion: 1, customerId: 'customer-a', version: 1,
+      status: 'draft', archivedAt: null, createdAt: at, updatedAt: at,
+      bom: { id: 'bom-' + projectId, projectId, updatedAt: at, items: [firstLine, secondLine] } }]);
+    publish({ customerId: 'customer-a', source: 'firebase' });
+    const harness = await RouterTestingHarness.create('/my/projects/' + projectId + '/bom'); await settle(harness);
+    const page = harness.routeDebugElement!.query(node => node.componentInstance instanceof ProjectBomPage);
+    expect(page).toBeDefined();
+    const root = harness.routeNativeElement!;
+    const articleRegion = root.querySelector('section[aria-labelledby="project-bom-title"]')!;
+    const estimateRegion = root.querySelector('section[aria-labelledby="bom-estimate-title"]')!;
+    const reloadButtons = () => [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .filter(button => button.textContent?.trim() === 'Reload / retry BOM');
+    expect(root.querySelectorAll('[data-line-id]')).toHaveLength(2);
+    expect(reloadButtons()).toHaveLength(0);
+    expect([...articleRegion.querySelectorAll('button')].filter(button => button.textContent?.trim() === 'Reload / retry BOM')).toHaveLength(0);
+    expect([...estimateRegion.querySelectorAll('button')].filter(button => button.textContent?.trim() === 'Reload / retry BOM')).toHaveLength(0);
+
+    let releaseReload!: () => void;
+    const accountProjects = TestBed.inject(AccountProjectService);
+    const originalLoadProject = accountProjects.loadProject.bind(accountProjects);
+    const loadProject = vi.spyOn(accountProjects, 'loadProject').mockImplementation(id => {
+      if (id !== projectId) return originalLoadProject(id);
+      return new Promise(resolve => { releaseReload = () => resolve(records.get('customer-a')![0]); });
+    });
+    const reload = vi.spyOn(page!.componentInstance as ProjectBomPage, 'reload');
+    const component = page!.componentInstance as ProjectBomPage;
+    const retryButtons = () => [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .filter(button => button.textContent?.trim() === 'Retry');
+    try {
+      expect(retryButtons()).toHaveLength(0);
+      component.error.set('Unable to load this project BOM. Review and retry.');
+      component.busy.set(true); harness.detectChanges();
+      expect(retryButtons()).toHaveLength(1);
+      expect(retryButtons()[0].disabled).toBe(true);
+      component.busy.set(false); harness.detectChanges();
+      expect(retryButtons()[0].disabled).toBe(false);
+      retryButtons()[0].click();
+      await vi.waitFor(() => expect(component.loading()).toBe(true));
+      harness.detectChanges();
+      expect([...root.querySelectorAll<HTMLElement>('[role="status"]')].filter(status => status.textContent?.trim() === 'Loading project BOM…')).toHaveLength(1);
+      expect(reloadButtons()).toHaveLength(0);
+      expect(writes).toEqual([]);
+      expect(reload).toHaveBeenCalledTimes(1);
+      releaseReload();
+      await vi.waitFor(() => expect(component.loading()).toBe(false));
+      harness.detectChanges();
+      expect([...root.querySelectorAll<HTMLElement>('[role="status"]')].filter(status => status.textContent?.trim() === 'Loading project BOM…')).toHaveLength(0);
+      expect(retryButtons()).toHaveLength(0);
+      expect(loadProject).toHaveBeenCalledTimes(1);
+      expect(reloadButtons()).toHaveLength(0);
+    } finally {
+      loadProject.mockRestore();
+      reload.mockRestore();
+    }
   });
 });
